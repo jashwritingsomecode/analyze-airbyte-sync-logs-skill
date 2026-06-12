@@ -13,7 +13,12 @@ Parses Airbyte sync log files and produces structured reports with:
 - Per-stream record counts
 - Destination write statistics by model
 - State tracking (initial and final)
-- Errors and warnings
+- Errors and warnings, **categorized against documented failure patterns with remediation steps**
+- Record-count sanity checks (skipped/errored records, read-vs-written deltas, silent write failures)
+- Rate-limit attribution (how much sync time was spent waiting on API throttling)
+- Cross-connector triage: analyze many logs at once and get a severity-ordered, worst-first summary
+
+All output is secret-redacted: tokens, API keys, passwords, and common credential formats are masked before anything is emitted.
 
 ## Installation
 
@@ -46,6 +51,68 @@ Ask your AI assistant to analyze a sync log:
 - "What happened in this sync?"
 - "Compare these two sync logs"
 - "Were there any errors in this sync?"
+- "Triage all the logs in `/path/to/logs/` and tell me what to fix first"
+- "What does this mean: 'Failure — sonarqube-feed exit code was 1'?"
+
+### Standalone (no AI assistant)
+
+The categorizer also runs directly:
+
+```bash
+# Single log: enriched JSON with categories, severities, remediation
+python3 scripts/categorize.py sync_log.txt
+
+# Many logs: adds a cross-connector triage summary, worst first
+python3 scripts/categorize.py logs/*.log
+
+# Standalone Markdown report (shareable artifact)
+python3 scripts/categorize.py logs/*.log --report triage.md
+
+# Categorize a status string from the Airbyte Sources page
+python3 scripts/categorize.py --status-text "Failure — sonarqube-feed exit code was 1"
+```
+
+The raw parser remains available and unchanged: `python3 scripts/analyze-sync-logs.py sync_log.txt`.
+
+### Extending the knowledge base
+
+Error patterns live in `scripts/error_patterns.json`. Each entry has an `id`, `category`, `severity`, `provenance` (`faros-doc` or `generic`), regex `match.any` list, `summary`, `remediation` steps, and an optional `source_doc` link. Patterns are evaluated in order; the first match wins.
+
+To add site-specific patterns without touching the bundled KB, create `scripts/error_patterns.local.json` with the same structure — overlay entries take priority. Unmatched errors are always surfaced verbatim as `uncategorized`, never dropped.
+
+### Automated triage (cron)
+
+For continuous triage without anyone in the loop, run the analyzer on a schedule on any host that can reach the Airbyte API — typically the Airbyte VM itself. Nothing stays resident between runs and no AI assistant is involved.
+
+```
+cron → fetch-airbyte-logs.py → categorize.py --report → email/Teams (findings only)
+```
+
+1. Clone this repo onto the host, e.g. `/opt/sync-analyzer`.
+2. Provide the API endpoint and (if required) credentials via environment variables — never hardcode them:
+   - `AIRBYTE_API_URL` (default `http://localhost:8000`)
+   - `AIRBYTE_API_USER` / `AIRBYTE_API_PASSWORD` (optional basic auth)
+3. Add a crontab entry:
+
+```cron
+*/30 * * * * AIRBYTE_API_URL=http://localhost:8000 TRIAGE_EMAIL_TO=alerts@example.com /opt/sync-analyzer/scripts/triage-cron.sh >> $HOME/.sync-triage/cron.log 2>&1
+```
+
+Behavior:
+
+- `fetch-airbyte-logs.py` polls the Airbyte API for sync jobs that finished since the last poll (tracked in a state file), and by default fetches logs for **failed and incomplete** jobs only.
+- Set `TRIAGE_FETCH_ALL=1` (e.g. on a separate daily crontab line) to also fetch succeeded jobs, so record-count sanity checks catch silent anomalies in "successful" syncs.
+- An email is sent only when there are findings. `TRIAGE_EMAIL_TO` can be a distribution list or a Teams channel email address.
+- Reports and enriched JSON accumulate in `~/.sync-triage/` (override with `TRIAGE_WORK_DIR`).
+- All output passes through the secret-redaction layer before it is written or sent.
+
+### Tests
+
+```bash
+python3 tests/run_tests.py
+```
+
+Synthetic logs in `tests/logs/` cover each pattern class, redaction, triage, rate-limit aggregation, and malformed input. No customer data.
 
 ## Output
 
@@ -66,6 +133,9 @@ The skill extracts structured data from the log file, which the AI assistant the
 | How many records synced? | "Show records per stream" |
 | Any errors? | "Were there any errors?" |
 | Compare two syncs | "Compare these logs and highlight differences" |
+| Triage many connectors | "Categorize the errors in these logs and tell me what to fix first" |
+| Why was a sync slow? | "How much of this sync was spent rate-limited?" |
+| Decode a status string | "What does 'exit code was 1' mean for this source?" |
 | Check state preservation | "What's the initial and final state for X stream?" |
 | Connector versions | "What source and destination versions were used?" |
 

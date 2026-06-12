@@ -1,0 +1,353 @@
+{
+  "$schema_note": "Error-pattern knowledge base for categorize.py. Entries are evaluated in order; the first match wins, so place more specific patterns before generic ones. Add customer/site-specific patterns in error_patterns.local.json (same structure) rather than editing this file; overlay entries take priority.",
+  "taxonomy": [
+    "rate_limit",
+    "permission",
+    "timeout",
+    "partial_sync",
+    "network_tls",
+    "resource_oom",
+    "config_setup",
+    "infra",
+    "state_incremental",
+    "api_error",
+    "uncategorized"
+  ],
+  "severities": ["critical", "high", "medium", "low"],
+  "patterns": [
+    {
+      "id": "self-signed-certificate",
+      "category": "network_tls",
+      "severity": "high",
+      "provenance": "faros-doc",
+      "connectors": [],
+      "match": {
+        "any": [
+          "self[ -]signed certificate",
+          "SELF_SIGNED_CERT_IN_CHAIN",
+          "unable to verify the first certificate",
+          "UNABLE_TO_VERIFY_LEAF_SIGNATURE"
+        ]
+      },
+      "summary": "The source endpoint presents a self-signed or unverifiable TLS certificate, so the connector refuses the connection.",
+      "remediation": [
+        "For Feeds sources, pass `--src.feed_cfg.reject_unauthorized false`; for other sources, `--src.reject_unauthorized false`.",
+        "As a fallback, use `--src-docker-options '-e NODE_TLS_REJECT_UNAUTHORIZED=0'`."
+      ],
+      "source_doc": "https://docs.faros.ai/docs/common-airbyte-connection-examples"
+    },
+    {
+      "id": "out-of-memory",
+      "category": "resource_oom",
+      "severity": "critical",
+      "provenance": "faros-doc",
+      "connectors": [],
+      "match": {
+        "any": [
+          "[Oo]ut [Oo]f [Mm]emory",
+          "OOMKilled",
+          "JavaScript heap out of memory",
+          "java\\.lang\\.OutOfMemoryError",
+          "exit code was 137"
+        ]
+      },
+      "summary": "The connector container ran out of memory and was killed before the sync could complete.",
+      "remediation": [
+        "Ensure the host has at least 16GB of free memory.",
+        "Cap container memory via `--max-memory` and set `NODE_OPTIONS=--max_old_space_size` for Node-based connectors."
+      ],
+      "source_doc": "https://docs.faros.ai/docs/common-airbyte-connection-examples"
+    },
+    {
+      "id": "github-projects-disabled",
+      "category": "permission",
+      "severity": "high",
+      "provenance": "faros-doc",
+      "connectors": ["github"],
+      "match": {
+        "any": [
+          "[Pp]rojects? (?:are |is )?disabled",
+          "Resource not accessible"
+        ]
+      },
+      "summary": "GitHub source fails when the project stream is active but projects are disabled on the repo, or the token cannot access a requested resource.",
+      "remediation": [
+        "Disable the `project` stream in the connection settings.",
+        "If the repository is not part of an organization, also disable the `organization` stream.",
+        "Verify the token has the scopes required by every enabled stream."
+      ],
+      "source_doc": "https://community.faros.ai/docs/gotchas"
+    },
+    {
+      "id": "hasura-metadata-inconsistent",
+      "category": "infra",
+      "severity": "medium",
+      "provenance": "faros-doc",
+      "connectors": [],
+      "match": {
+        "any": [
+          "[Ii]nconsistent metadata",
+          "metadata is inconsistent"
+        ]
+      },
+      "summary": "Hasura metadata inconsistency on Faros CE instances first started before 2022-05-20 causes resets to fail.",
+      "remediation": [
+        "Open the Hasura Console, navigate to the metadata inconsistency page, and use \"Delete All\" to clear inconsistent metadata."
+      ],
+      "source_doc": "https://community.faros.ai/docs/gotchas"
+    },
+    {
+      "id": "docker-compose-interpolation",
+      "category": "config_setup",
+      "severity": "medium",
+      "provenance": "faros-doc",
+      "connectors": [],
+      "match": {
+        "any": [
+          "Invalid interpolation format"
+        ]
+      },
+      "summary": "An outdated Docker Compose version cannot parse the interpolation syntax used in the compose file.",
+      "remediation": [
+        "Upgrade Docker Compose to a current version and rerun."
+      ],
+      "source_doc": "https://community.faros.ai/docs/gotchas"
+    },
+    {
+      "id": "faros-destination-settings-stuck",
+      "category": "config_setup",
+      "severity": "low",
+      "provenance": "faros-doc",
+      "connectors": ["faros-destination"],
+      "match": {
+        "any": [
+          "FAROS_AIRBYTE_FORCE_SETUP",
+          "Unknown error (?:occurred )?(?:while )?modifying.*destination"
+        ]
+      },
+      "summary": "The Airbyte UI reports an unknown error when modifying Faros Destination settings.",
+      "remediation": [
+        "Set `FAROS_AIRBYTE_FORCE_SETUP=true` in `.env`, rerun `docker compose up`, then set it back to `false`."
+      ],
+      "source_doc": "https://community.faros.ai/docs/gotchas"
+    },
+    {
+      "id": "metabase-migration-lock",
+      "category": "infra",
+      "severity": "medium",
+      "provenance": "faros-doc",
+      "connectors": [],
+      "match": {
+        "any": [
+          "[Dd]atabase has migration lock"
+        ]
+      },
+      "summary": "Metabase failed to start because a previous run left a migration lock in its database.",
+      "remediation": [
+        "Run the Metabase `migrate release-locks` command, then restart."
+      ],
+      "source_doc": "https://community.faros.ai/docs/gotchas"
+    },
+    {
+      "id": "n8n-invalid-json",
+      "category": "infra",
+      "severity": "low",
+      "provenance": "faros-doc",
+      "connectors": [],
+      "match": {
+        "any": [
+          "does not seem to be valid JSON"
+        ]
+      },
+      "summary": "n8n fails to initialize because its persisted data is corrupt.",
+      "remediation": [
+        "Remove the n8n container and the `n8n_data` volume, then restart."
+      ],
+      "source_doc": "https://community.faros.ai/docs/gotchas"
+    },
+    {
+      "id": "rate-limit",
+      "category": "rate_limit",
+      "severity": "medium",
+      "provenance": "generic",
+      "connectors": [],
+      "match": {
+        "any": [
+          "[Rr]ate.?limit",
+          "\\b429\\b",
+          "[Tt]oo [Mm]any [Rr]equests",
+          "Retry-After",
+          "quota (?:exceeded|exhausted)",
+          "throttl(?:ed|ing)"
+        ]
+      },
+      "summary": "The source API throttled the connector. Syncs usually still succeed but take much longer while the connector waits out the limit.",
+      "remediation": [
+        "Check the rate-limit wait aggregation in this report to see how much sync time was spent waiting.",
+        "Reduce request volume: lower `page_size`, narrow `cutoff_days`/`start_date`, or disable unneeded streams.",
+        "For large orgs, shard the connection into buckets (`bucket_id`/`bucket_total`) so each sync stays under the API quota.",
+        "If available, use a higher-quota API token or app installation."
+      ],
+      "source_doc": null
+    },
+    {
+      "id": "auth-failure",
+      "category": "permission",
+      "severity": "high",
+      "provenance": "generic",
+      "connectors": [],
+      "match": {
+        "any": [
+          "\\b401\\b",
+          "[Uu]nauthorized",
+          "\\b403\\b",
+          "[Ff]orbidden",
+          "[Bb]ad credentials",
+          "[Aa]uthentication (?:failed|error)",
+          "[Ii]nvalid (?:credentials|token|api.?key)",
+          "token (?:is )?expired"
+        ]
+      },
+      "summary": "The source rejected the connector's credentials — the token/key is invalid, expired, or missing a required scope.",
+      "remediation": [
+        "Verify the credential is current and rotate it if expired.",
+        "Confirm the token has the scopes/permissions required by every enabled stream.",
+        "Confirm the credential's account still has access to the projects/repos/boards being synced."
+      ],
+      "source_doc": null
+    },
+    {
+      "id": "request-timeout",
+      "category": "timeout",
+      "severity": "medium",
+      "provenance": "generic",
+      "connectors": [],
+      "match": {
+        "any": [
+          "ETIMEDOUT",
+          "ESOCKETTIMEDOUT",
+          "[Tt]imed? ?out",
+          "deadline exceeded",
+          "\\b408\\b"
+        ]
+      },
+      "summary": "A request to the source timed out — the endpoint is slow, overloaded, or unreachable within the connector's timeout window.",
+      "remediation": [
+        "Retry the sync; transient slowness often clears.",
+        "If a specific stream consistently times out, reduce `page_size` or disable the stream if it is marked non-performant in the source docs.",
+        "Check the network path between the Airbyte host and the source (VPN, proxy, firewall)."
+      ],
+      "source_doc": null
+    },
+    {
+      "id": "network-connectivity",
+      "category": "network_tls",
+      "severity": "medium",
+      "provenance": "generic",
+      "connectors": [],
+      "match": {
+        "any": [
+          "ECONNRESET",
+          "ECONNREFUSED",
+          "ENOTFOUND",
+          "EAI_AGAIN",
+          "EHOSTUNREACH",
+          "socket hang up",
+          "getaddrinfo",
+          "[Cc]onnection (?:reset|refused|closed)"
+        ]
+      },
+      "summary": "The connector could not establish or keep a network connection to the source endpoint.",
+      "remediation": [
+        "Verify the source URL is correct and resolvable from the Airbyte host.",
+        "Check VPN/proxy/firewall rules between the Airbyte host and the source.",
+        "Retry the sync; transient network resets often clear on the next run."
+      ],
+      "source_doc": null
+    },
+    {
+      "id": "server-error",
+      "category": "api_error",
+      "severity": "medium",
+      "provenance": "generic",
+      "connectors": [],
+      "match": {
+        "any": [
+          "\\b500\\b.{0,40}[Ii]nternal [Ss]erver [Ee]rror",
+          "[Ii]nternal [Ss]erver [Ee]rror",
+          "\\b502\\b|[Bb]ad [Gg]ateway",
+          "\\b503\\b|[Ss]ervice [Uu]navailable",
+          "\\b504\\b|[Gg]ateway [Tt]ime.?out"
+        ]
+      },
+      "summary": "The source API returned a server-side (5xx) error — the problem is on the source system, not the connector.",
+      "remediation": [
+        "Retry the sync once the source service recovers.",
+        "If persistent, check the source system's status page or contact its administrators.",
+        "If only one stream triggers 5xx responses, try reducing `page_size` for that stream."
+      ],
+      "source_doc": null
+    },
+    {
+      "id": "config-validation",
+      "category": "config_setup",
+      "severity": "high",
+      "provenance": "generic",
+      "connectors": [],
+      "match": {
+        "any": [
+          "[Cc]onfig validation error",
+          "is not valid under any of the given schemas",
+          "ValidationError",
+          "[Mm]issing required (?:field|property|parameter)"
+        ]
+      },
+      "summary": "The connection configuration failed validation — a required field is missing or has the wrong shape.",
+      "remediation": [
+        "Open the connection settings and compare against the connector's documented config schema.",
+        "Check for recently changed connector versions whose config schema may have changed."
+      ],
+      "source_doc": null
+    },
+    {
+      "id": "state-cursor-invalid",
+      "category": "state_incremental",
+      "severity": "medium",
+      "provenance": "generic",
+      "connectors": [],
+      "match": {
+        "any": [
+          "[Ii]nvalid (?:state|cursor)",
+          "[Cc]orrupt(?:ed)? state",
+          "[Cc]ursor field .* not found"
+        ]
+      },
+      "summary": "The saved incremental state/cursor is invalid, so the connector cannot resume from where the last sync left off.",
+      "remediation": [
+        "Reset the connection state for the affected stream and run a full refresh.",
+        "Compare initial vs. final stream state in this report to spot the malformed entry."
+      ],
+      "source_doc": null
+    },
+    {
+      "id": "source-exit-nonzero",
+      "category": "partial_sync",
+      "severity": "high",
+      "provenance": "faros-doc",
+      "connectors": [],
+      "match": {
+        "any": [
+          "exit code was 1\\b",
+          "exited with (?:non-zero|code 1)\\b",
+          "[Ss]ource process exited with non-zero exit code"
+        ]
+      },
+      "summary": "The source connector process exited with a non-zero code — a generic failure wrapper around a more specific error earlier in the log.",
+      "remediation": [
+        "Open the full log and locate the error lines preceding the exit; cross-reference them against this knowledge base.",
+        "If no preceding error exists, rerun the sync — the failure may be transient."
+      ],
+      "source_doc": "https://community.faros.ai/docs/gotchas"
+    }
+  ]
+}
