@@ -22,6 +22,7 @@ import re
 import sys
 import urllib.error
 import urllib.request
+from datetime import datetime, timezone
 
 DEFAULT_API_URL = "http://localhost:8000"
 TERMINAL_STATUSES = {"succeeded", "failed", "cancelled", "incomplete"}
@@ -74,17 +75,87 @@ def list_jobs(base_url, connection_id, page_size):
     return resp.get("jobs", [])
 
 
-def get_job_log_text(base_url, job_id):
-    """Fetch a job's log lines, tolerating both Airbyte log payload shapes."""
+_LEVEL_MAP = {"WARNING": "WARN", "ERR": "ERROR", "FATAL": "ERROR", "SEVERE": "ERROR"}
+_KNOWN_LEVELS = {"INFO", "WARN", "ERROR", "DEBUG", "TRACE"}
+
+
+def _normalize_level(level):
+    up = str(level or "INFO").upper()
+    up = _LEVEL_MAP.get(up, up)
+    return up if up in _KNOWN_LEVELS else "INFO"
+
+
+def _format_event_ts(ts):
+    """Render a structured-log timestamp as 'YYYY-MM-DD HH:MM:SS' so the
+    downstream parser (which keys on that prefix) can read it."""
+    try:
+        if isinstance(ts, str) and ts.isdigit():
+            ts = int(ts)
+        if isinstance(ts, (int, float)):
+            secs = ts / 1000.0 if ts > 1e11 else float(ts)  # epoch ms vs s
+            return datetime.fromtimestamp(secs, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        if isinstance(ts, str):
+            m = re.match(r"(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})", ts)
+            if m:
+                return f"{m.group(1)} {m.group(2)}"
+    except (ValueError, OverflowError, OSError):
+        pass
+    return "1970-01-01 00:00:00"
+
+
+def _events_to_lines(events):
+    """Reconstruct '[ts] LEVEL message' lines from structured log events."""
+    lines = []
+    for ev in events:
+        ts = _format_event_ts(ev.get("timestamp"))
+        lvl = _normalize_level(ev.get("level"))
+        lines.append(f"[{ts}] {lvl} {ev.get('message', '')}")
+    return lines
+
+
+def _attempt_log_lines(payload):
+    """Extract log lines from an attempt/get_for_job (or legacy jobs/get
+    attempt) payload, preferring structured events over formatted logLines."""
+    logs = payload.get("logs") or {}
+    if logs.get("events"):
+        return _events_to_lines(logs["events"])
+    if logs.get("logLines"):
+        return list(logs["logLines"])
+    return []
+
+
+def _latest_attempt_number(job_entry):
+    attempts = job_entry.get("attempts") or []
+    nums = []
+    for a in attempts:
+        ar = a.get("attempt", a) if isinstance(a, dict) else {}
+        if isinstance(ar.get("id"), int):
+            nums.append(ar["id"])
+    if nums:
+        return max(nums)
+    return max(len(attempts) - 1, 0)
+
+
+def get_job_log_text(base_url, job_entry):
+    """Fetch the latest attempt's logs for a job. Uses the structured-logging
+    endpoint (attempt/get_for_job) and falls back to legacy inline jobs/get
+    logs only if that endpoint is absent (older Airbyte)."""
+    job = job_entry.get("job", job_entry)
+    job_id = job.get("id")
+    attempt_number = _latest_attempt_number(job_entry)
+    try:
+        resp = api_post(base_url, "/api/v1/attempt/get_for_job",
+                        {"jobId": job_id, "attemptNumber": attempt_number})
+        return "\n".join(_attempt_log_lines(resp))
+    except urllib.error.HTTPError as e:
+        if e.code != 404:
+            raise  # transient/auth error — let the caller retry next poll
+    # Legacy fallback: older Airbyte inlines logs in jobs/get attempts.
     detail = api_post(base_url, "/api/v1/jobs/get", {"id": job_id})
     lines = []
-    for entry in detail.get("attempts", []):
-        logs = entry.get("logs") or entry.get("attempt", {}).get("logs") or {}
-        if logs.get("logLines"):
-            lines.extend(logs["logLines"])
-        elif logs.get("events"):
-            for ev in logs["events"]:
-                lines.append(str(ev.get("message", "")))
+    for att in detail.get("attempts", []):
+        logs = att.get("logs") or att.get("attempt", {}).get("logs") or {}
+        lines.extend(_attempt_log_lines({"logs": logs}))
     return "\n".join(lines)
 
 
@@ -111,24 +182,23 @@ def safe_name(name):
 _API_ERRORS = (urllib.error.URLError, urllib.error.HTTPError, OSError, ValueError)
 
 
-def detect_log_shape(base_url, job_id):
-    """Probe one job's logs to report WHERE log content lives, without storing
-    it. Returns (per_attempt_shapes, top_level_jobs_get_keys). Each shape is
-    ('logLines'|'events', count) when recognized, else a keys hint so an
-    unfamiliar Airbyte version can be diagnosed."""
-    detail = api_post(base_url, "/api/v1/jobs/get", {"id": job_id})
-    shapes = []
-    for entry in detail.get("attempts", []):
-        logs = entry.get("logs") or entry.get("attempt", {}).get("logs") or {}
-        if logs.get("logLines"):
-            shapes.append(("logLines", len(logs["logLines"])))
-        elif logs.get("events"):
-            shapes.append(("events", len(logs["events"])))
-        elif logs:
-            shapes.append(("logs-keys:" + "|".join(sorted(map(str, logs.keys()))), 0))
-        else:
-            shapes.append(("attempt-keys:" + "|".join(sorted(map(str, entry.keys()))), 0))
-    return shapes, list(detail.keys())
+def detect_log_shape(base_url, job_entry):
+    """Probe one job's latest attempt to report WHERE log content lives,
+    without storing it. Returns (info, top_level_keys); info reports logType
+    and the event/logLine counts so an unfamiliar version can be diagnosed."""
+    job = job_entry.get("job", job_entry)
+    job_id = job.get("id")
+    attempt_number = _latest_attempt_number(job_entry)
+    resp = api_post(base_url, "/api/v1/attempt/get_for_job",
+                    {"jobId": job_id, "attemptNumber": attempt_number})
+    logs = resp.get("logs") or {}
+    info = {
+        "logType": resp.get("logType"),
+        "events": len(logs.get("events") or []),
+        "logLines": len(logs.get("logLines") or []),
+        "other_log_keys": sorted(k for k in logs if k not in ("events", "logLines", "version")),
+    }
+    return info, list(resp.keys())
 
 
 def dry_run_report(base_url, connections, processed, wanted, max_jobs, sample):
@@ -156,7 +226,7 @@ def dry_run_report(base_url, connections, processed, wanted, max_jobs, sample):
             if job_id in processed or status not in TERMINAL_STATUSES:
                 continue
             if status in wanted:
-                would_fetch.append((conn_name, job_id))
+                would_fetch.append((conn_name, entry))
 
     print("=== DRY RUN (no files written, state untouched) ===")
     print(f"API URL                : {base_url}")
@@ -166,18 +236,21 @@ def dry_run_report(base_url, connections, processed, wanted, max_jobs, sample):
 
     print(f"\nProbing log shape on up to {sample} job(s):")
     probed = ok = 0
-    for conn_name, job_id in would_fetch[:sample]:
+    for conn_name, entry in would_fetch[:sample]:
+        job_id = entry.get("job", entry).get("id")
         try:
-            shapes, top_keys = detect_log_shape(base_url, job_id)
+            info, top_keys = detect_log_shape(base_url, entry)
         except _API_ERRORS as e:
             print(f"  job {job_id} ({conn_name}): ERROR {e}")
             continue
         probed += 1
-        if any(s[0] in ("logLines", "events") and s[1] > 0 for s in shapes):
+        if info["events"] > 0 or info["logLines"] > 0:
             ok += 1
-        print(f"  job {job_id} ({conn_name}): attempts={shapes or 'none'}")
-        if not shapes:
-            print(f"    jobs/get top-level keys: {top_keys}")
+        print(f"  job {job_id} ({conn_name}): logType={info['logType']} "
+              f"events={info['events']} logLines={info['logLines']} "
+              f"top_keys={top_keys}")
+        if info["other_log_keys"]:
+            print(f"    unrecognized log keys: {info['other_log_keys']}")
 
     print()
     if probed == 0:
@@ -254,7 +327,7 @@ def main():
             if status not in wanted:
                 continue
             try:
-                text = get_job_log_text(args.api_url, job_id)
+                text = get_job_log_text(args.api_url, entry)
             except (urllib.error.URLError, urllib.error.HTTPError, OSError, ValueError) as e:
                 print(f"warning: failed to fetch log for job {job_id} "
                       f"({conn_name}): {e}", file=sys.stderr)

@@ -268,17 +268,30 @@ class _StubAirbyteHandler(BaseHTTPRequestHandler):
             ]}
         elif self.path == "/api/v1/jobs/list":
             resp = {"jobs": [
-                {"job": {"id": 42, "status": "failed"}},
-                {"job": {"id": 41, "status": "succeeded"}},
-                {"job": {"id": 40, "status": "running"}},
+                {"job": {"id": 42, "status": "failed"}, "attempts": [{"id": 0}, {"id": 1}]},
+                {"job": {"id": 41, "status": "succeeded"}, "attempts": [{"id": 0}]},
+                {"job": {"id": 40, "status": "running"}, "attempts": [{"id": 0}]},
             ]}
-        elif self.path == "/api/v1/jobs/get":
-            line = ("[2026-06-10 08:00:05] ERROR HTTP 401 Unauthorized: Bad credentials"
-                    if body.get("id") == 42 else
-                    "[2026-06-10 08:00:05] INFO Finished syncing commits stream. Read 10 records")
+        elif self.path == "/api/v1/attempt/get_for_job":
+            # Structured-logging shape: logs.events[] with separate fields.
+            msg = ("HTTP 401 Unauthorized: Bad credentials"
+                   if body.get("jobId") == 42 else
+                   "Finished syncing commits stream. Read 10 records")
+            level = "ERROR" if body.get("jobId") == 42 else "INFO"
             resp = {
-                "job": {"id": body.get("id")},
-                "attempts": [{"logs": {"logLines": [line]}}],
+                "attempt": {"id": body.get("attemptNumber")},
+                "logType": "structured",
+                "logs": {
+                    "version": "1",
+                    "logLines": [],
+                    "events": [{
+                        "timestamp": 1781920805000,
+                        "message": msg,
+                        "level": level,
+                        "logSource": "source",
+                        "caller": None,
+                    }],
+                },
             }
         else:
             self.send_response(404)
@@ -343,7 +356,7 @@ class TestFetcher(unittest.TestCase):
             self.assertEqual(proc.returncode, 0, proc.stderr)
             out = proc.stdout
             self.assertIn("DRY RUN", out)
-            self.assertIn("logLines", out)          # detected log shape
+            self.assertIn("structured", out)        # detected logType
             self.assertIn("COMPATIBLE", out)        # verdict
             # No files or state written in dry-run mode.
             self.assertFalse(os.path.exists(os.path.join(tmp, ".fetch-state.json")))
