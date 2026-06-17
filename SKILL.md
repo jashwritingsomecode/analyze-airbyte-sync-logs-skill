@@ -28,6 +28,7 @@ Steps:
    - **Categorized errors and warnings** (`logs[].findings`), grouped by severity (critical → high → medium → low). For each finding show: category, summary, the matched message, remediation steps, and the source doc link when present. Findings with category `uncategorized` must still be shown verbatim — never drop them.
    - **Record-count sanity** (`logs[].record_count_sanity.flags`): surface any flags (skipped/errored records, read-vs-written deltas, zero-write anomalies) with their severity.
    - **Rate-limit attribution** (`logs[].rate_limit`): if `events > 0`, report the number of backoff events, total wait time, and what fraction of the sync duration was spent waiting — this explains slow syncs.
+   - **Suppressed noise** (`logs[].suppressed`): if `count > 0`, note in one line how many non-actionable platform/orchestrator log lines were filtered out (e.g. resource-cleanup, runtime warnings), so the omission is transparent. Do not itemize them.
 5. If multiple logs are provided, lead with the triage summary (`triage`):
    - Connectors ordered worst-first (`triage.prioritized`), with status, worst severity, and finding counts
    - Finding counts by severity and by category

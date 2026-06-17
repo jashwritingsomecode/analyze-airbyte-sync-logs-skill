@@ -286,12 +286,28 @@ def connector_name(parsed, filepath):
     return os.path.splitext(os.path.basename(filepath))[0]
 
 
+def _summarize_noise(noise):
+    by_pattern = {}
+    samples = []
+    for f in noise:
+        by_pattern[f["pattern_id"]] = by_pattern.get(f["pattern_id"], 0) + 1
+        if len(samples) < 3:
+            samples.append(f["message"][:200])
+    return {"count": len(noise), "by_pattern": by_pattern, "samples": samples}
+
+
 def categorize_parsed(parsed, patterns, filepath, rate_limit=None):
-    findings = []
+    all_findings = []
     for err in parsed.get("errors", []):
-        findings.append(build_finding(err["message"], "error", err.get("timestamp"), patterns))
+        all_findings.append(build_finding(err["message"], "error", err.get("timestamp"), patterns))
     for warn in parsed.get("warnings", []):
-        findings.append(build_finding(warn["message"], "warn", warn.get("timestamp"), patterns))
+        all_findings.append(build_finding(warn["message"], "warn", warn.get("timestamp"), patterns))
+
+    # Non-actionable platform noise is routed out of findings (so it does not
+    # inflate severity counts or bury real failures) but still counted, never
+    # silently dropped.
+    findings = [f for f in all_findings if f["category"] != "noise"]
+    noise = [f for f in all_findings if f["category"] == "noise"]
     findings.sort(key=lambda f: (SEVERITY_RANK.get(f["severity"], 9), f["timestamp"] or ""))
 
     return {
@@ -299,6 +315,7 @@ def categorize_parsed(parsed, patterns, filepath, rate_limit=None):
         "connector": connector_name(parsed, filepath),
         "sync": parsed.get("sync"),
         "findings": findings,
+        "suppressed": _summarize_noise(noise),
         "rate_limit": rate_limit,
         "record_count_sanity": record_count_sanity(parsed),
         "parsed": parsed,
@@ -345,6 +362,7 @@ def triage_summary(results):
         "connectors_analyzed": len(results),
         "findings_by_severity": by_severity,
         "findings_by_category": by_category,
+        "suppressed_noise_total": sum(r["suppressed"]["count"] for r in results),
         "prioritized": prioritized,
     }
 
@@ -374,6 +392,10 @@ def render_report(output):
     lines.append("# Airbyte Sync Triage Report")
     lines.append("")
     lines.append(f"Analyzed **{triage['connectors_analyzed']}** log(s).")
+    if triage.get("suppressed_noise_total"):
+        lines.append("")
+        lines.append(f"_Suppressed {triage['suppressed_noise_total']} non-actionable "
+                     f"platform log line(s) (orchestrator/runtime noise) across all logs._")
     lines.append("")
 
     if triage["findings_by_severity"]:
@@ -474,6 +496,12 @@ def render_report(output):
             lines.append("")
             for flag in sanity["flags"]:
                 lines.append(f"- **{flag['severity']}** ({flag['check']}): {flag['detail']}")
+            lines.append("")
+
+        sup = r.get("suppressed", {})
+        if sup.get("count"):
+            lines.append(f"_Suppressed {sup['count']} non-actionable platform line(s): "
+                         f"{', '.join(f'{k}×{v}' for k, v in sup['by_pattern'].items())}._")
             lines.append("")
 
     return "\n".join(lines) + "\n"

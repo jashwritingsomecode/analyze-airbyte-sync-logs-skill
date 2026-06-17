@@ -11,6 +11,7 @@
     "infra",
     "state_incremental",
     "api_error",
+    "noise",
     "uncategorized"
   ],
   "severities": ["critical", "high", "medium", "low"],
@@ -289,6 +290,28 @@
       "source_doc": null
     },
     {
+      "id": "source-check-failed",
+      "category": "config_setup",
+      "severity": "high",
+      "provenance": "generic",
+      "connectors": [],
+      "match": {
+        "any": [
+          "Checking (?:source|destination) connection failed",
+          "Failed to (?:check|validate) (?:source|destination) connection",
+          "[Cc]onnection (?:check|test) failed"
+        ]
+      },
+      "summary": "Airbyte's pre-sync connection check failed, so the sync never started and produced no detailed sync log. The generic status message hides the specific cause (credentials, host reachability, or configuration).",
+      "remediation": [
+        "Open the source's connection-check/test log in Airbyte to see the specific error — the generic status message does not include it.",
+        "Verify the source credentials are current and carry the scopes every enabled stream needs.",
+        "Confirm the source host/URL is reachable from the Airbyte environment (network, VPN, firewall, TLS).",
+        "Review the connection configuration for recently changed or missing required fields."
+      ],
+      "source_doc": null
+    },
+    {
       "id": "config-validation",
       "category": "config_setup",
       "severity": "high",
@@ -330,6 +353,27 @@
       "source_doc": null
     },
     {
+      "id": "job-failed-retries",
+      "category": "partial_sync",
+      "severity": "high",
+      "provenance": "generic",
+      "connectors": [],
+      "match": {
+        "any": [
+          "Job failed after too many retries",
+          "failed after too many retries",
+          "[Tt]oo many (?:consecutive )?(?:failures|retries|attempts)"
+        ]
+      },
+      "summary": "Airbyte gave up after exhausting its retry attempts. This is the terminal failure wrapper — the cause that triggered the retries (auth, timeout, rate limit, or source error) appears earlier in the log or in the `Failing job ... reason:` line.",
+      "remediation": [
+        "Find the `Failing job ... reason:` line and the errors preceding it; those carry the underlying cause.",
+        "If the underlying cause is transient (timeout, rate limit, 5xx), the next scheduled sync may recover on its own.",
+        "If it recurs every run, treat the underlying error as the real failure and remediate that."
+      ],
+      "source_doc": null
+    },
+    {
       "id": "source-exit-nonzero",
       "category": "partial_sync",
       "severity": "high",
@@ -348,6 +392,63 @@
         "If no preceding error exists, rerun the sync — the failure may be transient."
       ],
       "source_doc": "https://community.faros.ai/docs/gotchas"
+    },
+    {
+      "id": "noise-resource-cleanup",
+      "category": "noise",
+      "severity": "low",
+      "provenance": "generic",
+      "connectors": [],
+      "match": {
+        "any": [
+          "Error closing resource",
+          "LocalContainerAirbyte(?:Source|Destination)",
+          "runJobs failed; recording failure but continuing to finish"
+        ]
+      },
+      "summary": "Airbyte orchestrator resource-cleanup chatter emitted at ERROR level while a job winds down. Not actionable on its own — the real cause is elsewhere in the log.",
+      "remediation": [
+        "No action needed for this line; look at the categorized findings for the actual failure cause."
+      ],
+      "source_doc": null
+    },
+    {
+      "id": "noise-runtime-warnings",
+      "category": "noise",
+      "severity": "low",
+      "provenance": "generic",
+      "connectors": [],
+      "match": {
+        "any": [
+          "node --trace-warnings",
+          "\"Hook\\(\\)\" repurposing warning",
+          "repurposing warning, use",
+          "ExperimentalWarning",
+          "DeprecationWarning"
+        ]
+      },
+      "summary": "Node.js/library runtime warnings echoed into the connector log. Non-actionable noise.",
+      "remediation": [
+        "No action needed; these are upstream library warnings, not sync failures."
+      ],
+      "source_doc": null
+    },
+    {
+      "id": "noise-empty-stage-framing",
+      "category": "noise",
+      "severity": "low",
+      "provenance": "generic",
+      "connectors": [],
+      "match": {
+        "any": [
+          "^(?:Source|Destination)(?:Reader|Writer) error:\\s*$"
+        ]
+      },
+      "summary": "Airbyte worker stage-framing line with no payload (the detail is on the following stack-trace lines). Non-actionable by itself.",
+      "remediation": [
+        "No action needed for this line; the underlying cause appears in the adjacent error lines or the `Failing job ... reason:` line."
+      ],
+      "source_doc": null
     }
   ]
 }

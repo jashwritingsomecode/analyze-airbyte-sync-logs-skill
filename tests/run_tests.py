@@ -98,6 +98,32 @@ class TestCategorization(unittest.TestCase):
         cats = [f["category"] for f in result["logs"][0]["findings"]]
         self.assertEqual(cats.count("rate_limit"), 3)
 
+    def test_noise_suppressed_and_retry_categorized(self):
+        log_text = "\n".join([
+            "[2026-06-10 08:00:00] ERROR Error closing resource io.airbyte.container."
+            "orchestrator.worker.io.LocalContainerAirbyteSource@1a2b3c; recording",
+            "[2026-06-10 08:00:01] ERROR (Use `node --trace-warnings ...` to show "
+            "where the warning was created)",
+            "[2026-06-10 08:00:02] ERROR runJobs failed; recording failure but "
+            "continuing to finish.",
+            "[2026-06-10 08:00:03] ERROR Failing job: 16032, reason: Job failed after "
+            "too many retries for connection abc-123",
+        ])
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "noisy.log")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(log_text + "\n")
+            result, _ = categorize(path)
+        entry = result["logs"][0]
+        # The 3 noise lines are routed out of findings...
+        self.assertEqual(entry["suppressed"]["count"], 3)
+        # ...leaving only the real terminal-failure finding.
+        self.assertEqual(len(entry["findings"]), 1)
+        self.assertEqual(entry["findings"][0]["pattern_id"], "job-failed-retries")
+        self.assertEqual(entry["findings"][0]["category"], "partial_sync")
+        self.assertEqual(result["triage"]["suppressed_noise_total"], 3)
+        self.assertNotIn("noise", result["triage"]["findings_by_category"])
+
     def test_uncategorized_fallback(self):
         result, _ = categorize(log("unknown_error.log"))
         f = result["logs"][0]["findings"][0]
@@ -111,6 +137,20 @@ class TestCategorization(unittest.TestCase):
         f = result["status_text_findings"][0]
         self.assertEqual(f["pattern_id"], "source-exit-nonzero")
         self.assertEqual(f["category"], "partial_sync")
+
+    def test_status_text_source_check_failed(self):
+        # The generic check-phase failure string Airbyte shows when a sync
+        # never starts and produces no detailed log.
+        result, _ = categorize(
+            "--status-text",
+            "Failure in source: Checking source connection failed - please "
+            "review this connection's configuration to prevent future syncs "
+            "from failing",
+        )
+        f = result["status_text_findings"][0]
+        self.assertEqual(f["pattern_id"], "source-check-failed")
+        self.assertEqual(f["category"], "config_setup")
+        self.assertEqual(f["severity"], "high")
 
 
 class TestRecordCountSanity(unittest.TestCase):
