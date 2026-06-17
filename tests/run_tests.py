@@ -333,6 +333,22 @@ class TestFetcher(unittest.TestCase):
             # Running job 40 must not be fetched or marked processed
             self.assertEqual(len(names), 2)
 
+    def test_dry_run_reports_shape_without_side_effects(self):
+        env = dict(os.environ, AIRBYTE_API_URL=self.api_url)
+        with tempfile.TemporaryDirectory() as tmp:
+            proc = subprocess.run(
+                [sys.executable, FETCHER, "--output-dir", tmp, "--dry-run"],
+                capture_output=True, text=True, env=env,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            out = proc.stdout
+            self.assertIn("DRY RUN", out)
+            self.assertIn("logLines", out)          # detected log shape
+            self.assertIn("COMPATIBLE", out)        # verdict
+            # No files or state written in dry-run mode.
+            self.assertFalse(os.path.exists(os.path.join(tmp, ".fetch-state.json")))
+            self.assertEqual(os.listdir(tmp), [])
+
     def test_fetched_log_flows_through_categorizer(self):
         with tempfile.TemporaryDirectory() as tmp:
             paths = self.fetch(tmp)

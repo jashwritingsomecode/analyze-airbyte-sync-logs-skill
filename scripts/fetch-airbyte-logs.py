@@ -108,6 +108,88 @@ def safe_name(name):
     return re.sub(r"[^A-Za-z0-9._-]+", "-", name).strip("-") or "connection"
 
 
+_API_ERRORS = (urllib.error.URLError, urllib.error.HTTPError, OSError, ValueError)
+
+
+def detect_log_shape(base_url, job_id):
+    """Probe one job's logs to report WHERE log content lives, without storing
+    it. Returns (per_attempt_shapes, top_level_jobs_get_keys). Each shape is
+    ('logLines'|'events', count) when recognized, else a keys hint so an
+    unfamiliar Airbyte version can be diagnosed."""
+    detail = api_post(base_url, "/api/v1/jobs/get", {"id": job_id})
+    shapes = []
+    for entry in detail.get("attempts", []):
+        logs = entry.get("logs") or entry.get("attempt", {}).get("logs") or {}
+        if logs.get("logLines"):
+            shapes.append(("logLines", len(logs["logLines"])))
+        elif logs.get("events"):
+            shapes.append(("events", len(logs["events"])))
+        elif logs:
+            shapes.append(("logs-keys:" + "|".join(sorted(map(str, logs.keys()))), 0))
+        else:
+            shapes.append(("attempt-keys:" + "|".join(sorted(map(str, entry.keys()))), 0))
+    return shapes, list(detail.keys())
+
+
+def dry_run_report(base_url, connections, processed, wanted, max_jobs, sample):
+    """Hit the API read-only and report what WOULD be fetched plus the detected
+    log shape. Writes no files and does not update state."""
+    status_tally = {}
+    would_fetch = []
+    for conn in connections:
+        conn_id = conn.get("connectionId")
+        conn_name = safe_name(conn.get("name", conn_id or "connection"))
+        if not conn_id:
+            continue
+        try:
+            jobs = list_jobs(base_url, conn_id, max_jobs)
+        except _API_ERRORS as e:
+            print(f"warning: failed to list jobs for {conn_name}: {e}", file=sys.stderr)
+            continue
+        for entry in jobs:
+            job = entry.get("job", entry)
+            job_id = job.get("id")
+            status = (job.get("status") or "").lower()
+            if job_id is None:
+                continue
+            status_tally[status] = status_tally.get(status, 0) + 1
+            if job_id in processed or status not in TERMINAL_STATUSES:
+                continue
+            if status in wanted:
+                would_fetch.append((conn_name, job_id))
+
+    print("=== DRY RUN (no files written, state untouched) ===")
+    print(f"API URL                : {base_url}")
+    print(f"Connections discovered : {len(connections)}")
+    print(f"Recent jobs by status  : {status_tally}")
+    print(f"New jobs to be fetched  : {len(would_fetch)}")
+
+    print(f"\nProbing log shape on up to {sample} job(s):")
+    probed = ok = 0
+    for conn_name, job_id in would_fetch[:sample]:
+        try:
+            shapes, top_keys = detect_log_shape(base_url, job_id)
+        except _API_ERRORS as e:
+            print(f"  job {job_id} ({conn_name}): ERROR {e}")
+            continue
+        probed += 1
+        if any(s[0] in ("logLines", "events") and s[1] > 0 for s in shapes):
+            ok += 1
+        print(f"  job {job_id} ({conn_name}): attempts={shapes or 'none'}")
+        if not shapes:
+            print(f"    jobs/get top-level keys: {top_keys}")
+
+    print()
+    if probed == 0:
+        print("VERDICT: connectivity OK, but no fetchable failed jobs to probe — "
+              "log shape unconfirmed.")
+    elif ok == probed:
+        print("VERDICT: log retrieval looks COMPATIBLE (logLines/events present).")
+    else:
+        print("VERDICT: log retrieval may be INCOMPATIBLE with this Airbyte version. "
+              "Share the bracketed shape/keys above so the fetcher can be adapted.")
+
+
 def main():
     ap = argparse.ArgumentParser(
         description="Fetch new Airbyte sync job logs for triage"
@@ -124,10 +206,15 @@ def main():
                          "(default: failed and incomplete only)")
     ap.add_argument("--max-jobs", type=int, default=20,
                     help="Max recent jobs to inspect per connection")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="Probe the API read-only: report what would be fetched "
+                         "and the detected log shape, without writing files or "
+                         "updating state")
+    ap.add_argument("--sample", type=int, default=5,
+                    help="In --dry-run, how many jobs to probe for log shape")
     args = ap.parse_args()
 
     state_path = args.state or os.path.join(args.output_dir, ".fetch-state.json")
-    os.makedirs(args.output_dir, exist_ok=True)
     processed = load_state(state_path)
     wanted = TERMINAL_STATUSES if args.all else DEFAULT_FETCH_STATUSES
 
@@ -137,6 +224,12 @@ def main():
         print(f"Error reaching Airbyte API at {args.api_url}: {e}", file=sys.stderr)
         sys.exit(1)
 
+    if args.dry_run:
+        dry_run_report(args.api_url, connections, processed, wanted,
+                       args.max_jobs, args.sample)
+        return
+
+    os.makedirs(args.output_dir, exist_ok=True)
     fetched = 0
     for conn in connections:
         conn_id = conn.get("connectionId")

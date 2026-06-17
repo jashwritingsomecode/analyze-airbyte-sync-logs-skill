@@ -46,6 +46,24 @@ needed. A 401/403 means basic auth is required — capture those credentials for
 Step 3. Update `AIRBYTE_API_URL` in `cronjob.yaml` and `namespace` in
 `kustomization.yaml` to match what you find.
 
+### Validate end-to-end without writing anything (`--dry-run`)
+
+Before scheduling, confirm the fetcher can reach the API *and* read job logs on
+this Airbyte version. From a machine that can reach the API (e.g. via
+`kubectl port-forward svc/airbyte-airbyte-server-svc 8001:8001`, then point at
+`http://localhost:8001`):
+
+```bash
+AIRBYTE_API_URL=http://localhost:8001 \
+  python3 scripts/fetch-airbyte-logs.py --dry-run
+```
+
+It reports the connections found, recent jobs by status, how many would be
+fetched, and — critically — the detected **log shape** per sampled job. A
+`VERDICT: ... COMPATIBLE` line means log retrieval works on this version. An
+`INCOMPATIBLE` verdict prints the actual response keys so the log-reading code
+can be adapted. It writes no files and does not touch the state file.
+
 ## Step 2 — (Optional) configure notification
 
 Edit the `SMTP_*` env values in `cronjob.yaml`. Leave `SMTP_HOST` empty to skip
