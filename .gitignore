@@ -1,0 +1,23 @@
+# Local scratch area — real customer logs, fetched logs, generated reports.
+# NEVER commit customer data to this repo (it is public-ready and SOC 2 scoped).
+local/
+airbyte-logs/
+*.triage.md
+triage-*.md
+triage-*.json
+
+# Customer-specific KB overlay (keep out of the public KB)
+scripts/error_patterns.local.json
+
+# Internal planning / hand-off docs (not part of the open-source skill)
+SIEMENS_DATA_TRUST_RESTART.md
+enhanced-airbyte-log-analyzer-plan.md
+jira-ticket-draft.md
+ACTIVEPIECES_FLOW_KT.md
+
+# Python
+__pycache__/
+*.pyc
+
+# macOS
+.DS_Store
