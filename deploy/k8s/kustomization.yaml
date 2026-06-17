@@ -1,0 +1,32 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Deploy into the namespace where Airbyte runs (confirm with `kubectl get ns`).
+namespace: airbyte
+
+resources:
+  - serviceaccount.yaml
+  - pvc.yaml
+  - cronjob.yaml
+  # Enable after tuning the selectors for your CNI/environment:
+  # - networkpolicy.yaml
+
+# The analyzer's scripts and knowledge base are delivered as a ConfigMap
+# generated directly from the repo — no container image build, no registry,
+# no git pull from inside the cluster. Re-run `kubectl apply -k .` after
+# editing any script or adding error_patterns.local.json to roll the update.
+configMapGenerator:
+  - name: analyzer-scripts
+    files:
+      - ../../scripts/analyze-sync-logs.py
+      - ../../scripts/categorize.py
+      - ../../scripts/error_patterns.json
+      - ../../scripts/fetch-airbyte-logs.py
+      - ../../scripts/notify.py
+      - ../../scripts/triage-cron.sh
+    # Add your customer overlay here once you have one:
+    #   - ../../scripts/error_patterns.local.json
+
+generatorOptions:
+  # Stable ConfigMap name so cronjob.yaml can reference it directly.
+  disableNameSuffixHash: true

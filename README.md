@@ -80,13 +80,23 @@ Error patterns live in `scripts/error_patterns.json`. Each entry has an `id`, `c
 
 To add site-specific patterns without touching the bundled KB, create `scripts/error_patterns.local.json` with the same structure — overlay entries take priority. Unmatched errors are always surfaced verbatim as `uncategorized`, never dropped.
 
-### Automated triage (cron)
+### Automated triage
 
-For continuous triage without anyone in the loop, run the analyzer on a schedule on any host that can reach the Airbyte API — typically the Airbyte VM itself. Nothing stays resident between runs and no AI assistant is involved.
+For continuous triage without anyone in the loop, run the analyzer on a schedule on infrastructure that can reach the Airbyte API. Nothing stays resident between runs and no AI assistant is involved.
 
 ```
-cron → fetch-airbyte-logs.py → categorize.py --report → email/Teams (findings only)
+schedule → fetch-airbyte-logs.py → categorize.py --report → email/Teams (findings only)
 ```
+
+In both cases:
+
+- `fetch-airbyte-logs.py` polls the Airbyte API for sync jobs that finished since the last poll (tracked in a state file), and by default fetches logs for **failed and incomplete** jobs only.
+- Set `TRIAGE_FETCH_ALL=1` to also fetch succeeded jobs, so record-count sanity checks catch silent anomalies in "successful" syncs.
+- A notification is sent only when there are findings, via SMTP (`SMTP_*`, container-friendly) or `mailx` (`TRIAGE_EMAIL_TO`, on VM hosts). The recipient can be a distribution list or a Teams channel email address.
+- Reports and enriched JSON accumulate in the work directory (`TRIAGE_WORK_DIR`).
+- All output passes through the secret-redaction layer before it is written or sent.
+
+#### On a VM / docker-compose host (cron)
 
 1. Clone this repo onto the host, e.g. `/opt/sync-analyzer`.
 2. Provide the API endpoint and (if required) credentials via environment variables — never hardcode them:
@@ -98,13 +108,13 @@ cron → fetch-airbyte-logs.py → categorize.py --report → email/Teams (findi
 */30 * * * * AIRBYTE_API_URL=http://localhost:8000 TRIAGE_EMAIL_TO=alerts@example.com /opt/sync-analyzer/scripts/triage-cron.sh >> $HOME/.sync-triage/cron.log 2>&1
 ```
 
-Behavior:
+#### On Kubernetes (CronJob)
 
-- `fetch-airbyte-logs.py` polls the Airbyte API for sync jobs that finished since the last poll (tracked in a state file), and by default fetches logs for **failed and incomplete** jobs only.
-- Set `TRIAGE_FETCH_ALL=1` (e.g. on a separate daily crontab line) to also fetch succeeded jobs, so record-count sanity checks catch silent anomalies in "successful" syncs.
-- An email is sent only when there are findings. `TRIAGE_EMAIL_TO` can be a distribution list or a Teams channel email address.
-- Reports and enriched JSON accumulate in `~/.sync-triage/` (override with `TRIAGE_WORK_DIR`).
-- All output passes through the secret-redaction layer before it is written or sent.
+If Airbyte is deployed in a Kubernetes cluster, deploy the analyzer as a `CronJob` in the same cluster. The scripts are delivered as a ConfigMap (no image build, no registry, no in-cluster git pull) and state persists on a PVC. See **[`deploy/k8s/`](deploy/k8s/README.md)** for the manifests and a step-by-step guide, including commands to discover the in-cluster Airbyte API URL.
+
+```bash
+cd deploy/k8s && kubectl apply -k .
+```
 
 ### Tests
 

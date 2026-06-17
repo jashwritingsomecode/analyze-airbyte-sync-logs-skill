@@ -21,6 +21,7 @@ LOGS = os.path.join(TESTS_DIR, "logs")
 PARSER = os.path.join(SCRIPTS, "analyze-sync-logs.py")
 CATEGORIZER = os.path.join(SCRIPTS, "categorize.py")
 FETCHER = os.path.join(SCRIPTS, "fetch-airbyte-logs.py")
+NOTIFIER = os.path.join(SCRIPTS, "notify.py")
 
 
 def log(name):
@@ -298,6 +299,52 @@ class TestFetcher(unittest.TestCase):
             result, _ = categorize(paths[0])
             by_id = findings_by_id(result)
             self.assertIn("auth-failure", by_id)
+
+
+class TestNotifier(unittest.TestCase):
+    def _load_notify_module(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("notify", NOTIFIER)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def test_build_message(self):
+        mod = self._load_notify_module()
+        msg = mod.build_message("subj", "the report body",
+                                "from@example.com", ["a@example.com", "b@example.com"])
+        self.assertEqual(msg["Subject"], "subj")
+        self.assertEqual(msg["From"], "from@example.com")
+        self.assertEqual(msg["To"], "a@example.com, b@example.com")
+        self.assertIn("the report body", msg.get_content())
+
+    def test_noop_without_smtp_host(self):
+        # No SMTP_HOST -> exit 0, send nothing, even with a real report path.
+        env = {k: v for k, v in os.environ.items() if not k.startswith("SMTP_")}
+        with tempfile.TemporaryDirectory() as tmp:
+            report = os.path.join(tmp, "r.md")
+            with open(report, "w", encoding="utf-8") as f:
+                f.write("# report")
+            proc = subprocess.run(
+                [sys.executable, NOTIFIER, report],
+                capture_output=True, text=True, env=env,
+            )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stdout.strip(), "")
+
+    def test_missing_from_to_errors(self):
+        env = dict(os.environ, SMTP_HOST="smtp.invalid")
+        env.pop("SMTP_FROM", None)
+        env.pop("SMTP_TO", None)
+        with tempfile.TemporaryDirectory() as tmp:
+            report = os.path.join(tmp, "r.md")
+            with open(report, "w", encoding="utf-8") as f:
+                f.write("# report")
+            proc = subprocess.run(
+                [sys.executable, NOTIFIER, report],
+                capture_output=True, text=True, env=env,
+            )
+        self.assertEqual(proc.returncode, 1)
 
 
 if __name__ == "__main__":
