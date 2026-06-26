@@ -370,6 +370,96 @@ class TestFetcher(unittest.TestCase):
             self.assertIn("auth-failure", by_id)
 
 
+class _StubPublicApiHandler(BaseHTTPRequestHandler):
+    """Mimics a Public-API-only Airbyte (1.x): the legacy Config list endpoints
+    404, discovery is served at /api/public/v1/..., and log content still comes
+    from the Config attempt/get_for_job endpoint."""
+
+    def _send(self, obj, code=200):
+        data = json.dumps(obj).encode("utf-8")
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def do_GET(self):
+        if self.path.startswith("/api/public/v1/connections"):
+            self._send({"data": [
+                {"connectionId": "conn-1", "name": "code acme github"},
+            ], "next": None})
+        elif self.path.startswith("/api/public/v1/jobs"):
+            self._send({"data": [
+                {"jobId": 42, "status": "failed", "attemptCount": 2},
+                {"jobId": 41, "status": "succeeded", "attemptCount": 1},
+                {"jobId": 40, "status": "running", "attemptCount": 1},
+            ]})
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    def do_POST(self):
+        length = int(self.headers.get("Content-Length", 0))
+        body = json.loads(self.rfile.read(length) or b"{}")
+        if self.path == "/api/v1/attempt/get_for_job":
+            msg = ("HTTP 401 Unauthorized: Bad credentials"
+                   if body.get("jobId") == 42 else
+                   "Finished syncing commits stream. Read 10 records")
+            level = "ERROR" if body.get("jobId") == 42 else "INFO"
+            self._send({
+                "attempt": {"id": body.get("attemptNumber")},
+                "logType": "structured",
+                "logs": {"version": "1", "logLines": [], "events": [{
+                    "timestamp": 1781920805000, "message": msg, "level": level,
+                    "logSource": "source", "caller": None,
+                }]},
+            })
+        else:
+            # All legacy Config list endpoints are gone on this instance.
+            self.send_response(404)
+            self.end_headers()
+
+    def log_message(self, *args):
+        pass
+
+
+class TestFetcherPublicApi(unittest.TestCase):
+    def setUp(self):
+        self.server = HTTPServer(("127.0.0.1", 0), _StubPublicApiHandler)
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        self.api_url = f"http://127.0.0.1:{self.server.server_address[1]}"
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+
+    def _run(self, outdir, *extra):
+        env = dict(os.environ, AIRBYTE_API_URL=self.api_url)
+        proc = subprocess.run(
+            [sys.executable, FETCHER, "--output-dir", outdir, *extra],
+            capture_output=True, text=True, env=env,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        return proc
+
+    def test_falls_back_to_public_api_for_discovery(self):
+        # Config list endpoints 404 -> discovery must use the Public API, and
+        # the failed job's log (via Config attempt/get_for_job) still lands.
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = [p for p in self._run(tmp).stdout.splitlines() if p.strip()]
+            self.assertEqual(len(paths), 1)
+            self.assertIn("code-acme-github__job42.log", paths[0])
+            with open(paths[0], encoding="utf-8") as f:
+                self.assertIn("401 Unauthorized", f.read())
+
+    def test_dry_run_reports_public_discovery(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = self._run(tmp, "--dry-run").stdout
+            self.assertIn("Discovery API          : public", out)
+            self.assertIn("Connections discovered : 1", out)
+            self.assertIn("COMPATIBLE", out)
+
+
 class TestNotifier(unittest.TestCase):
     def _load_notify_module(self):
         import importlib.util

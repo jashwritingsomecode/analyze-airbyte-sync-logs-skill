@@ -1,10 +1,18 @@
 #!/usr/bin/env python3
-"""Fetch new terminal Airbyte sync job logs via the Airbyte Config API.
+"""Fetch new terminal Airbyte sync job logs via the Airbyte API.
 
 Polls the API for sync jobs that finished since the last run (tracked in a
 state file), writes each job's log text to a file, and prints the file paths
 to stdout — ready to pipe into categorize.py. Designed to run from cron;
 between runs nothing is resident.
+
+Connection/job discovery prefers the Config API (POST /api/v1/...) and falls
+back automatically to the Public API (GET /api/public/v1/...) on a 404, so the
+tool works against both legacy and Public-API-only (Airbyte 1.x) instances.
+Log *content* is retrieved from the Config API attempt/get_for_job endpoint
+(with a legacy jobs/get fallback); the Public API exposes no structured
+per-attempt log endpoint, so if the Config API is fully blocked, log retrieval
+will fail with a clear per-job warning rather than write empty files.
 
 Endpoint and credentials come from environment variables (never hardcoded):
   AIRBYTE_API_URL       base URL, e.g. http://localhost:8000 (default)
@@ -39,22 +47,54 @@ def _auth_header():
     return None
 
 
-def api_post(base_url, path, payload, timeout=30):
-    headers = {"Content-Type": "application/json", "Accept": "application/json"}
+def api_request(base_url, path_or_url, method="GET", payload=None, timeout=30):
+    """Single HTTP entry point for both API families. Accepts an absolute URL
+    (used by Public API pagination, whose `next` links may be absolute) or a
+    path joined onto base_url. Sends a JSON body only when payload is given."""
+    headers = {"Accept": "application/json"}
+    if payload is not None:
+        headers["Content-Type"] = "application/json"
     auth = _auth_header()
     if auth:
         headers["Authorization"] = auth
-    req = urllib.request.Request(
-        base_url.rstrip("/") + path,
-        data=json.dumps(payload).encode("utf-8"),
-        headers=headers,
-        method="POST",
-    )
+    url = path_or_url if re.match(r"^https?://", path_or_url) else base_url.rstrip("/") + path_or_url
+    data = json.dumps(payload).encode("utf-8") if payload is not None else None
+    req = urllib.request.Request(url, data=data, headers=headers, method=method)
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
 
+def api_post(base_url, path, payload, timeout=30):
+    return api_request(base_url, path, method="POST", payload=payload, timeout=timeout)
+
+
+def api_get(base_url, path_or_url, timeout=30):
+    return api_request(base_url, path_or_url, method="GET", timeout=timeout)
+
+
+# Which API family answers discovery calls on this instance: "config"
+# (POST /api/v1/...) or "public" (GET /api/public/v1/...). Learned from the
+# first 404 and reused, so we don't re-probe the dead family on every call.
+_API_MODE = {"discovery": None}
+
+
 def list_connections(base_url):
+    """List sync connections, preferring the Config API and falling back to the
+    Public API (v1.8+) if the Config endpoint is absent (404)."""
+    if _API_MODE["discovery"] == "public":
+        return _list_connections_public(base_url)
+    try:
+        conns = _list_connections_config(base_url)
+        _API_MODE["discovery"] = "config"
+        return conns
+    except urllib.error.HTTPError as e:
+        if e.code != 404:
+            raise  # auth/transient — surface it, don't mask as "no Config API"
+    _API_MODE["discovery"] = "public"
+    return _list_connections_public(base_url)
+
+
+def _list_connections_config(base_url):
     connections = []
     workspaces = api_post(base_url, "/api/v1/workspaces/list", {}).get("workspaces", [])
     for ws in workspaces:
@@ -66,13 +106,62 @@ def list_connections(base_url):
     return connections
 
 
+def _list_connections_public(base_url):
+    """Airbyte Public API: GET /api/public/v1/connections, cursor-paginated via
+    a `next` link. Connection objects already expose connectionId/name, matching
+    what the Config API returns, so no per-field remap is needed here."""
+    connections = []
+    next_url = "/api/public/v1/connections?limit=100&offset=0"
+    while next_url:
+        resp = api_get(base_url, next_url)
+        connections.extend(resp.get("data", []))
+        next_url = resp.get("next") or None
+    return connections
+
+
 def list_jobs(base_url, connection_id, page_size):
+    """List recent sync jobs for a connection in whichever API family is live."""
+    if _API_MODE["discovery"] == "public":
+        return _list_jobs_public(base_url, connection_id, page_size)
+    try:
+        return _list_jobs_config(base_url, connection_id, page_size)
+    except urllib.error.HTTPError as e:
+        if e.code != 404:
+            raise
+        _API_MODE["discovery"] = "public"
+        return _list_jobs_public(base_url, connection_id, page_size)
+
+
+def _list_jobs_config(base_url, connection_id, page_size):
     resp = api_post(base_url, "/api/v1/jobs/list", {
         "configTypes": ["sync"],
         "configId": connection_id,
         "pagination": {"pageSize": page_size, "rowOffset": 0},
     })
     return resp.get("jobs", [])
+
+
+def _list_jobs_public(base_url, connection_id, page_size):
+    """Airbyte Public API: GET /api/public/v1/jobs. Returns flat job objects
+    (jobId/status, no nested attempts), so normalize each into the Config-API
+    {"job": {...}, "attempts": [...]} shape the rest of the script expects."""
+    resp = api_get(
+        base_url,
+        f"/api/public/v1/jobs?connectionId={connection_id}&jobType=sync&limit={page_size}",
+    )
+    return [_normalize_public_job(j) for j in resp.get("data", [])]
+
+
+def _normalize_public_job(j):
+    """Adapt a Public API job to the Config API entry shape. Public jobs carry
+    no attempt list; synthesize one from attemptCount (when present) so
+    _latest_attempt_number resolves the right attemptNumber for log retrieval."""
+    n = j.get("attemptCount")
+    attempts = [{"attempt": {"id": i}} for i in range(n)] if isinstance(n, int) and n > 0 else []
+    return {
+        "job": {"id": j.get("jobId"), "status": j.get("status")},
+        "attempts": attempts,
+    }
 
 
 _LEVEL_MAP = {"WARNING": "WARN", "ERR": "ERROR", "FATAL": "ERROR", "SEVERE": "ERROR"}
@@ -230,18 +319,20 @@ def dry_run_report(base_url, connections, processed, wanted, max_jobs, sample):
 
     print("=== DRY RUN (no files written, state untouched) ===")
     print(f"API URL                : {base_url}")
+    print(f"Discovery API          : {_API_MODE['discovery'] or 'config'}")
     print(f"Connections discovered : {len(connections)}")
     print(f"Recent jobs by status  : {status_tally}")
     print(f"New jobs to be fetched  : {len(would_fetch)}")
 
     print(f"\nProbing log shape on up to {sample} job(s):")
-    probed = ok = 0
+    probed = ok = errored = 0
     for conn_name, entry in would_fetch[:sample]:
         job_id = entry.get("job", entry).get("id")
         try:
             info, top_keys = detect_log_shape(base_url, entry)
         except _API_ERRORS as e:
             print(f"  job {job_id} ({conn_name}): ERROR {e}")
+            errored += 1
             continue
         probed += 1
         if info["events"] > 0 or info["logLines"] > 0:
@@ -253,7 +344,15 @@ def dry_run_report(base_url, connections, processed, wanted, max_jobs, sample):
             print(f"    unrecognized log keys: {info['other_log_keys']}")
 
     print()
-    if probed == 0:
+    if probed == 0 and errored and _API_MODE["discovery"] == "public":
+        print("VERDICT: discovery works via the Public API, but the Config API "
+              "log endpoint (attempt/get_for_job) is unreachable — log content "
+              "cannot be retrieved. The Public API exposes no per-attempt log "
+              "endpoint; make the Config API reachable for log fetching.")
+    elif probed == 0 and errored:
+        print("VERDICT: connectivity OK, but log retrieval failed on every probed "
+              "job — see the ERROR lines above.")
+    elif probed == 0:
         print("VERDICT: connectivity OK, but no fetchable failed jobs to probe — "
               "log shape unconfirmed.")
     elif ok == probed:
