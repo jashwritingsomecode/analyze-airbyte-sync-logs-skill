@@ -200,9 +200,9 @@
       "match": {
         "any": [
           "\\b401\\b",
-          "[Uu]nauthorized",
+          "\\b[Uu]nauthorized\\b",
           "\\b403\\b",
-          "[Ff]orbidden",
+          "\\b[Ff]orbidden\\b",
           "[Bb]ad credentials",
           "[Aa]uthentication (?:failed|error)",
           "[Ii]nvalid (?:credentials|token|api.?key)",
