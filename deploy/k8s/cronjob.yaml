@@ -47,7 +47,7 @@ spec:
                 # Confirm the in-cluster Airbyte API URL with the discovery
                 # commands in deploy/k8s/README.md before applying.
                 - name: AIRBYTE_API_URL
-                  value: "http://airbyte-airbyte-server-svc:8001"
+                  value: "http://faros-airbyte-prod-faros-airbyte-airbyte-server-svc:8001"
                 - name: TRIAGE_WORK_DIR
                   value: "/data"
                 - name: TRIAGE_FETCH_ALL

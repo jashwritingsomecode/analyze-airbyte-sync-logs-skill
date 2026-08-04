@@ -10,7 +10,10 @@
 #   TRIAGE_FETCH_ALL   if set to 1, fetch succeeded jobs as well so
 #                      record-count sanity checks run on healthy-looking syncs
 #
-# Notification (only sent when there are findings), in order of preference:
+# Delivery: when there are findings the report is ALWAYS printed to stdout
+# (between REPORT-BEGIN/REPORT-END markers), so in Kubernetes it lands in the
+# pod logs and any cluster log-aggregation stack (Splunk/Datadog/ELK) can
+# index or alert on it — no SMTP required. Optional email on top:
 #   SMTP_HOST (+ SMTP_FROM/SMTP_TO/...)  container-friendly; see notify.py
 #   TRIAGE_EMAIL_TO                      uses mailx if available (VM hosts)
 set -euo pipefail
@@ -50,11 +53,16 @@ PY
 if [ "$HAS_FINDINGS" = "1" ]; then
   COUNT="$(echo "$NEW_LOGS" | wc -l | tr -d ' ')"
   SUBJECT="Airbyte sync triage: findings in $COUNT sync(s)"
+
+  # Always-available channel: print the report to stdout so the pod logs /
+  # cluster log aggregation carry it even with no mail relay configured.
+  echo "=== TRIAGE-REPORT-BEGIN ($SUBJECT) ==="
+  cat "$REPORT"
+  echo "=== TRIAGE-REPORT-END (saved: $REPORT) ==="
+
   if [ -n "${SMTP_HOST:-}" ]; then
     python3 "$SKILL_DIR/scripts/notify.py" --subject "$SUBJECT" "$REPORT"
   elif [ -n "${TRIAGE_EMAIL_TO:-}" ] && command -v mailx >/dev/null 2>&1; then
     mailx -s "$SUBJECT" "$TRIAGE_EMAIL_TO" < "$REPORT"
-  else
-    echo "Findings present; no notifier configured. Report at $REPORT" >&2
   fi
 fi

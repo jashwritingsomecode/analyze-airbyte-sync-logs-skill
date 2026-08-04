@@ -31,10 +31,10 @@ actual cluster.
 kubectl get pods -A | grep -i airbyte
 
 # The server API service + port (the default assumes airbyte-airbyte-server-svc:8001)
-kubectl -n airbyte get svc | grep -i server
+kubectl -n hnc-airbyte-fds get svc | grep -i server
 
 # Confirm the API answers (and whether it needs auth) from inside the cluster:
-kubectl -n airbyte run triage-probe --rm -it --restart=Never \
+kubectl -n hnc-airbyte-fds run triage-probe --rm -it --restart=Never \
   --image=curlimages/curl -- \
   sh -c "curl -s -X POST \
     http://airbyte-airbyte-server-svc:8001/api/v1/workspaces/list \
@@ -66,10 +66,17 @@ can be adapted. It writes no files and does not touch the state file.
 
 ## Step 2 — (Optional) configure notification
 
-Edit the `SMTP_*` env values in `cronjob.yaml`. Leave `SMTP_HOST` empty to skip
-alerting entirely — reports still accumulate on the PVC and can be read with
-`kubectl cp`. `SMTP_TO` can be a distribution list or a Teams channel email
-address.
+When a run has findings, the triage report is **always printed to the pod's
+stdout** between `=== TRIAGE-REPORT-BEGIN ===` / `=== TRIAGE-REPORT-END ===`
+markers. In a cluster with log aggregation (Splunk, Datadog, ELK, ...), that
+means reports are automatically searchable and alertable there — search for
+`TRIAGE-REPORT-BEGIN`, or alert on its presence — with **no SMTP relay
+required**. Reports also accumulate on the PVC and can be read with
+`kubectl cp`.
+
+Email is optional on top: edit the `SMTP_*` env values in `cronjob.yaml`.
+Leave `SMTP_HOST` empty to skip email entirely. `SMTP_TO` can be a
+distribution list or a Teams channel email address.
 
 ## Step 3 — Create the credentials Secret (only if needed)
 
@@ -77,7 +84,7 @@ Never commit credentials. Create the Secret imperatively, including only the
 keys you actually use:
 
 ```bash
-kubectl -n airbyte create secret generic sync-log-triage-secrets \
+kubectl -n hnc-airbyte-fds create secret generic sync-log-triage-secrets \
   --from-literal=AIRBYTE_API_USER='<user>' \
   --from-literal=AIRBYTE_API_PASSWORD='<password>' \
   --from-literal=SMTP_USERNAME='<smtp-user>' \
@@ -102,14 +109,14 @@ from ../../scripts), and the CronJob.
 
 ```bash
 # Trigger a one-off run without waiting for the schedule:
-kubectl -n airbyte create job --from=cronjob/sync-log-triage triage-manual-1
+kubectl -n hnc-airbyte-fds create job --from=cronjob/sync-log-triage triage-manual-1
 
 # Watch it and read logs:
-kubectl -n airbyte get jobs -w
-kubectl -n airbyte logs job/triage-manual-1
+kubectl -n hnc-airbyte-fds get jobs -w
+kubectl -n hnc-airbyte-fds logs job/triage-manual-1
 
 # Inspect the generated report on the PVC via a throwaway pod, or:
-kubectl -n airbyte logs job/triage-manual-1   # wrapper prints where the report landed
+kubectl -n hnc-airbyte-fds logs job/triage-manual-1   # wrapper prints where the report landed
 ```
 
 The first run fetches recent failed/incomplete jobs and records their IDs in
