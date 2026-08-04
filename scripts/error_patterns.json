@@ -14,7 +14,12 @@
     "noise",
     "uncategorized"
   ],
-  "severities": ["critical", "high", "medium", "low"],
+  "severities": [
+    "critical",
+    "high",
+    "medium",
+    "low"
+  ],
   "patterns": [
     {
       "id": "self-signed-certificate",
@@ -64,7 +69,9 @@
       "category": "permission",
       "severity": "high",
       "provenance": "faros-doc",
-      "connectors": ["github"],
+      "connectors": [
+        "github"
+      ],
       "match": {
         "any": [
           "[Pp]rojects? (?:are |is )?disabled",
@@ -119,7 +126,9 @@
       "category": "config_setup",
       "severity": "low",
       "provenance": "faros-doc",
-      "connectors": ["faros-destination"],
+      "connectors": [
+        "faros-destination"
+      ],
       "match": {
         "any": [
           "FAROS_AIRBYTE_FORCE_SETUP",
@@ -350,7 +359,7 @@
         "Reset the connection state for the affected stream and run a full refresh.",
         "Compare initial vs. final stream state in this report to spot the malformed entry."
       ],
-      "source_doc": null
+      "source_doc": "https://docs.airbyte.com/cloud/managing-airbyte-cloud/manage-connection-state"
     },
     {
       "id": "job-failed-retries",
@@ -371,7 +380,7 @@
         "If the underlying cause is transient (timeout, rate limit, 5xx), the next scheduled sync may recover on its own.",
         "If it recurs every run, treat the underlying error as the real failure and remediate that."
       ],
-      "source_doc": null
+      "source_doc": "https://docs.airbyte.com/understanding-airbyte/jobs"
     },
     {
       "id": "source-exit-nonzero",
