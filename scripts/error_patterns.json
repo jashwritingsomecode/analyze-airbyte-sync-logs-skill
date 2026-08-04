@@ -84,7 +84,7 @@
         "If the repository is not part of an organization, also disable the `organization` stream.",
         "Verify the token has the scopes required by every enabled stream."
       ],
-      "source_doc": "https://community.faros.ai/docs/gotchas"
+      "source_doc": null
     },
     {
       "id": "hasura-metadata-inconsistent",
@@ -102,7 +102,7 @@
       "remediation": [
         "Open the Hasura Console, navigate to the metadata inconsistency page, and use \"Delete All\" to clear inconsistent metadata."
       ],
-      "source_doc": "https://community.faros.ai/docs/gotchas"
+      "source_doc": null
     },
     {
       "id": "docker-compose-interpolation",
@@ -119,7 +119,7 @@
       "remediation": [
         "Upgrade Docker Compose to a current version and rerun."
       ],
-      "source_doc": "https://community.faros.ai/docs/gotchas"
+      "source_doc": null
     },
     {
       "id": "faros-destination-settings-stuck",
@@ -139,7 +139,7 @@
       "remediation": [
         "Set `FAROS_AIRBYTE_FORCE_SETUP=true` in `.env`, rerun `docker compose up`, then set it back to `false`."
       ],
-      "source_doc": "https://community.faros.ai/docs/gotchas"
+      "source_doc": null
     },
     {
       "id": "metabase-migration-lock",
@@ -156,7 +156,7 @@
       "remediation": [
         "Run the Metabase `migrate release-locks` command, then restart."
       ],
-      "source_doc": "https://community.faros.ai/docs/gotchas"
+      "source_doc": null
     },
     {
       "id": "n8n-invalid-json",
@@ -173,7 +173,7 @@
       "remediation": [
         "Remove the n8n container and the `n8n_data` volume, then restart."
       ],
-      "source_doc": "https://community.faros.ai/docs/gotchas"
+      "source_doc": null
     },
     {
       "id": "rate-limit",
@@ -400,7 +400,7 @@
         "Open the full log and locate the error lines preceding the exit; cross-reference them against this knowledge base.",
         "If no preceding error exists, rerun the sync — the failure may be transient."
       ],
-      "source_doc": "https://community.faros.ai/docs/gotchas"
+      "source_doc": null
     },
     {
       "id": "noise-resource-cleanup",
