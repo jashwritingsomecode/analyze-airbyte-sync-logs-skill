@@ -11,6 +11,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -22,6 +23,8 @@ PARSER = os.path.join(SCRIPTS, "analyze-sync-logs.py")
 CATEGORIZER = os.path.join(SCRIPTS, "categorize.py")
 FETCHER = os.path.join(SCRIPTS, "fetch-airbyte-logs.py")
 NOTIFIER = os.path.join(SCRIPTS, "notify.py")
+CRON = os.path.join(SCRIPTS, "triage-cron.sh")
+EMITTER = os.path.join(SCRIPTS, "emit-sync-events.py")
 
 
 def log(name):
@@ -458,6 +461,179 @@ class TestFetcherPublicApi(unittest.TestCase):
             self.assertIn("Discovery API          : public", out)
             self.assertIn("Connections discovered : 1", out)
             self.assertIn("COMPATIBLE", out)
+
+
+class _CronLogMixin:
+    """Serve synthetic raw logs through either discovery API's real fetch path."""
+
+    def do_POST(self):
+        if self.path != "/api/v1/attempt/get_for_job":
+            return super().do_POST()
+        body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
+        data = json.dumps({
+            "logType": "formatted",
+            "logs": {"logLines": self.server.logs[body["jobId"]].splitlines()},
+        }).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+
+class _CronConfigHandler(_CronLogMixin, _StubAirbyteHandler):
+    pass
+
+
+class _CronPublicHandler(_CronLogMixin, _StubPublicApiHandler):
+    pass
+
+
+class TestCronEvents(unittest.TestCase):
+    handlers = (_CronConfigHandler, _CronPublicHandler)
+
+    @contextmanager
+    def cron_environment(self, handler, failed_text=None, **settings):
+        with open(log("success_clean.log"), encoding="utf-8") as source:
+            clean = source.read()
+        with open(log("auth_failure.log"), encoding="utf-8") as source:
+            failed = source.read()
+        server = HTTPServer(("127.0.0.1", 0), handler)
+        server.logs = {42: failed if failed_text is None else failed_text, 41: clean}
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                env = dict(os.environ)
+                for key in list(env):
+                    if key.startswith(("AIRBYTE_", "SMTP_", "TRIAGE_")):
+                        env.pop(key)
+                env.update(AIRBYTE_API_URL=f"http://127.0.0.1:{server.server_address[1]}",
+                           TRIAGE_WORK_DIR=tmp, **settings)
+                yield tmp, env
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join()
+
+    def poll(self, env):
+        proc = subprocess.run(["bash", CRON], env=env, capture_output=True,
+                              text=True, timeout=30)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        return proc.stdout
+
+    def test_default_json_and_duplicate_poll(self):
+        for handler in self.handlers:
+            with self.subTest(api=handler.__name__), self.cron_environment(handler) as (tmp, env):
+                lines = self.poll(env).splitlines()
+                self.assertEqual(len(lines), 1)
+                event = json.loads(lines[0])
+                self.assertEqual(event["event"], "airbyte.sync.triage")
+                self.assertEqual(event["job_id"], 42)
+                self.assertEqual(event["status"], "failed")
+                self.assertEqual(event["worst_severity"], "high")
+                self.assertEqual(event["finding_count"], len(event["findings"]))
+                self.assertTrue(any(f["pattern_id"] == "auth-failure" for f in event["findings"]))
+                self.assertEqual(set(event), {
+                    "event", "connector", "job_id", "status", "worst_severity",
+                    "finding_count", "top_finding", "findings", "sanity_flags",
+                    "sanity_details", "suppressed_noise_count", "rate_limit_wait_s",
+                })
+                self.assertTrue(any(p.endswith(".md") for p in os.listdir(tmp)))
+                self.assertTrue(any(p.startswith("triage-") and p.endswith(".json")
+                                    for p in os.listdir(tmp)))
+                self.assertEqual(self.poll(env), "")
+
+    def test_all_includes_success_and_no_finding_failure(self):
+        failed = '[2026-06-10 08:00:00] INFO Sync summary: {"status":"failed"}\n'
+        for handler in self.handlers:
+            with self.subTest(api=handler.__name__), self.cron_environment(
+                    handler, failed, TRIAGE_FETCH_ALL="1") as (_, env):
+                events = {e["job_id"]: e for e in map(json.loads, self.poll(env).splitlines())}
+                self.assertEqual(set(events), {41, 42})
+                self.assertEqual(events[41]["status"], "completed")
+                self.assertEqual(events[42]["status"], "failed")
+                for event in events.values():
+                    self.assertEqual(event["finding_count"], 0)
+                    self.assertEqual(event["findings"], [])
+                    self.assertIsNone(event["top_finding"])
+                    self.assertIsNone(event["worst_severity"])
+                self.assertEqual(self.poll(env), "")
+
+    def test_unknown_status_noise_and_warning_redaction(self):
+        secret = "cron-private-secret"
+        tail = "full-message-tail"
+        message = 'Odd failure "quoted" password=' + secret + " " + "x" * 260 + tail
+        raw = (f"[2026-06-10 08:00:00] ERROR {message}\n"
+               "[2026-06-10 08:00:01] WARN Unrecognized warning token=" + secret + "\n"
+               "[2026-06-10 08:00:02] ERROR runJobs failed; recording failure but continuing to finish.\n")
+        for handler in self.handlers:
+            with self.subTest(api=handler.__name__), self.cron_environment(handler, raw) as (tmp, env):
+                out = self.poll(env)
+                self.assertNotIn(secret, out)
+                self.assertNotIn(tail, out)
+                event = json.loads(out)
+                self.assertEqual(event["status"], "unknown")
+                self.assertEqual(event["suppressed_noise_count"], 1)
+                self.assertEqual(event["finding_count"], 2)
+                self.assertEqual({f["level"] for f in event["findings"]}, {"error", "warn"})
+                self.assertTrue(event["findings"][0]["summary_truncated"])
+                self.assertLessEqual(len(event["findings"][0]["summary"]), 240)
+                self.assertIn("***REDACTED***", out)
+                # Raw downloads are outside report redaction; inspect report artifacts only.
+                for name in os.listdir(tmp):
+                    if name.startswith("triage-"):
+                        with open(os.path.join(tmp, name), encoding="utf-8") as source:
+                            artifact = source.read()
+                        self.assertNotIn(secret, artifact)
+                        if name.endswith(".json"):
+                            # Markdown already samples/truncates messages; JSON is lossless.
+                            self.assertIn(tail, artifact)
+
+    def test_sanity_only_and_rate_limit_fields(self):
+        raw = ('[2026-06-10 08:00:00] INFO Sync summary: {"status":"completed"}\n'
+               '[2026-06-10 08:00:01] INFO Finished syncing commits stream. Read 10 records\n'
+               '[2026-06-10 08:00:02] INFO Processed 10 records\n'
+               '[2026-06-10 08:00:03] INFO Wrote 0 records\n'
+               '[2026-06-10 08:00:04] INFO rate limit: waiting for 30 seconds\n')
+        for handler in self.handlers:
+            with self.subTest(api=handler.__name__), self.cron_environment(handler, raw) as (_, env):
+                event = json.loads(self.poll(env))
+                self.assertEqual(event["finding_count"], 0)
+                self.assertIsNone(event["worst_severity"])
+                self.assertEqual(event["sanity_flags"], len(event["sanity_details"]))
+                self.assertTrue(any(f["check"] == "zero_writes" and f["severity"] == "high"
+                                    for f in event["sanity_details"]))
+                self.assertEqual(event["rate_limit_wait_s"], 30)
+
+    def test_markdown_opt_in_keeps_json_and_redaction(self):
+        raw = '[2026-06-10 08:00:00] ERROR Odd failure password=cron-private-secret\n'
+        with self.cron_environment(_CronConfigHandler, raw, TRIAGE_STDOUT_REPORT="1") as (_, env):
+            out = self.poll(env)
+            self.assertEqual(json.loads(out.splitlines()[0])["job_id"], 42)
+            self.assertIn("=== TRIAGE-REPORT-BEGIN", out)
+            self.assertIn("=== TRIAGE-REPORT-END", out)
+            self.assertNotIn("cron-private-secret", out)
+            self.assertEqual(self.poll(env), "")
+
+    def test_formatter_redacts_before_truncating(self):
+        result, _ = categorize(log("unknown_error.log"))
+        entry = result["logs"][0]
+        # Deliberately bypass input redaction to exercise the emitter boundary.
+        token = "ghp_" + "a" * 36
+        entry["findings"][0]["message"] = "x" * 220 + " " + token
+        result["triage"]["prioritized"][0]["connector"] = "password=private-connector"
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "input.json")
+            with open(path, "w", encoding="utf-8") as dest:
+                json.dump(result, dest)
+            proc = run(EMITTER, path)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        event = json.loads(proc.stdout)
+        self.assertIsNone(event["job_id"])
+        self.assertNotIn("ghp_", proc.stdout)
+        self.assertNotIn("private-connector", proc.stdout)
+        self.assertIn("***REDACTED***", proc.stdout)
 
 
 class TestNotifier(unittest.TestCase):

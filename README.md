@@ -85,16 +85,21 @@ To add site-specific patterns without touching the bundled KB, create `scripts/e
 For continuous triage without anyone in the loop, run the analyzer on a schedule on infrastructure that can reach the Airbyte API. Nothing stays resident between runs and no AI assistant is involved.
 
 ```
-schedule → fetch-airbyte-logs.py → categorize.py --report → email/Teams (findings only)
+schedule → fetch-airbyte-logs.py → categorize.py --report → emit-sync-events.py → JSON lines
+                                           └─ full reports on disk; optional email
 ```
 
 In both cases:
 
 - `fetch-airbyte-logs.py` polls the Airbyte API for sync jobs that finished since the last poll (tracked in a state file), and by default fetches logs for **failed and incomplete** jobs only.
 - Set `TRIAGE_FETCH_ALL=1` to also fetch succeeded jobs, so record-count sanity checks catch silent anomalies in "successful" syncs.
+- Each analyzed sync emits one compact, redacted `airbyte.sync.triage` JSON event to stdout, even if it has no findings. No newly analyzed syncs means no stdout; operational diagnostics still use stderr.
+- Full Markdown stays on disk by default. Set `TRIAGE_STDOUT_REPORT=1` to also print reports with findings between `TRIAGE-REPORT-BEGIN` / `TRIAGE-REPORT-END` markers.
 - A notification is sent only when there are findings, via SMTP (`SMTP_*`, container-friendly) or `mailx` (`TRIAGE_EMAIL_TO`, on VM hosts). The recipient can be a distribution list or a Teams channel email address.
 - Reports and enriched JSON accumulate in the work directory (`TRIAGE_WORK_DIR`).
-- All output passes through the secret-redaction layer before it is written or sent.
+- Reports and JSON events pass through the secret-redaction layer before they are written or sent.
+
+See the [event schema and Datadog notes](deploy/k8s/README.md#json-event-fields-and-datadog) for field meanings and collection prerequisites.
 
 #### On a VM / docker-compose host (cron)
 

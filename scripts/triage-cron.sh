@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # Entry point for both the VM cron job and the Kubernetes CronJob: fetch new
-# Airbyte sync logs, categorize them, and (optionally) email the triage report
-# when there are findings.
+# Airbyte sync logs, categorize them, and emit one JSON event per analyzed sync.
 #
 # Environment:
 #   AIRBYTE_API_URL / AIRBYTE_API_USER / AIRBYTE_API_PASSWORD  (see fetch-airbyte-logs.py)
@@ -9,11 +8,12 @@
 #                      volume path in Kubernetes so state survives between runs)
 #   TRIAGE_FETCH_ALL   if set to 1, fetch succeeded jobs as well so
 #                      record-count sanity checks run on healthy-looking syncs
+#   TRIAGE_STDOUT_REPORT  if set to 1, also print full Markdown reports when
+#                         findings exist (default: 0, to limit log ingestion)
 #
-# Delivery: when there are findings the report is ALWAYS printed to stdout
-# (between REPORT-BEGIN/REPORT-END markers), so in Kubernetes it lands in the
-# pod logs and any cluster log-aggregation stack (Splunk/Datadog/ELK) can
-# index or alert on it — no SMTP required. Optional email on top:
+# Delivery: compact JSON lines to stdout; full Markdown and JSON on the volume.
+# No new syncs means no stdout. Operational diagnostics use stderr.
+# Optional email when findings exist:
 #   SMTP_HOST (+ SMTP_FROM/SMTP_TO/...)  container-friendly; see notify.py
 #   TRIAGE_EMAIL_TO                      uses mailx if available (VM hosts)
 set -euo pipefail
@@ -41,6 +41,8 @@ JSON_OUT="$WORK_DIR/triage-$STAMP.json"
 echo "$NEW_LOGS" | xargs python3 "$SKILL_DIR/scripts/categorize.py" \
   --report "$REPORT" --compact > "$JSON_OUT"
 
+python3 "$SKILL_DIR/scripts/emit-sync-events.py" "$JSON_OUT"
+
 HAS_FINDINGS="$(python3 - "$JSON_OUT" <<'PY'
 import json, sys
 d = json.load(open(sys.argv[1]))
@@ -54,11 +56,11 @@ if [ "$HAS_FINDINGS" = "1" ]; then
   COUNT="$(echo "$NEW_LOGS" | wc -l | tr -d ' ')"
   SUBJECT="Airbyte sync triage: findings in $COUNT sync(s)"
 
-  # Always-available channel: print the report to stdout so the pod logs /
-  # cluster log aggregation carry it even with no mail relay configured.
-  echo "=== TRIAGE-REPORT-BEGIN ($SUBJECT) ==="
-  cat "$REPORT"
-  echo "=== TRIAGE-REPORT-END (saved: $REPORT) ==="
+  if [ "${TRIAGE_STDOUT_REPORT:-0}" = "1" ]; then
+    echo "=== TRIAGE-REPORT-BEGIN ($SUBJECT) ==="
+    cat "$REPORT"
+    echo "=== TRIAGE-REPORT-END (saved: $REPORT) ==="
+  fi
 
   if [ -n "${SMTP_HOST:-}" ]; then
     python3 "$SKILL_DIR/scripts/notify.py" --subject "$SUBJECT" "$REPORT"

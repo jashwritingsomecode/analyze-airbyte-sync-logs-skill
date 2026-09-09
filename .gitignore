@@ -17,6 +17,11 @@ ACTIVEPIECES_FLOW_KT.md
 DEPLOYMENT_HANDOFF.md
 KNOWLEDGE_TRANSFER.md
 
+# Local handoff diagrams (keep customer deliverables out of git)
+airbyte_sync_log_analyzer_architecture.svg
+sync_log_analyzer_kubernetes_architecture.svg
+sync_log_analyzer_usage_and_results.svg
+
 # Python
 __pycache__/
 *.pyc

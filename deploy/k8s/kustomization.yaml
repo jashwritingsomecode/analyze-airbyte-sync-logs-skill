@@ -20,6 +20,7 @@ configMapGenerator:
     files:
       - ../../scripts/analyze-sync-logs.py
       - ../../scripts/categorize.py
+      - ../../scripts/emit-sync-events.py
       - ../../scripts/error_patterns.json
       - ../../scripts/fetch-airbyte-logs.py
       - ../../scripts/notify.py

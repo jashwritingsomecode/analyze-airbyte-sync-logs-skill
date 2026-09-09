@@ -52,6 +52,8 @@ spec:
                   value: "/data"
                 - name: TRIAGE_FETCH_ALL
                   value: "0"
+                - name: TRIAGE_STDOUT_REPORT
+                  value: "0"          # JSON lines only; full reports stay on PVC
                 - name: PYTHONDONTWRITEBYTECODE
                   value: "1"
                 # --- Email/Teams notification (optional) ---
