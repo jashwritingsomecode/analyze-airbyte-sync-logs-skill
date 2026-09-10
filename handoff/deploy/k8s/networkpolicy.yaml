@@ -1,0 +1,40 @@
+# OPTIONAL least-privilege egress policy. Only enforced if the cluster runs a
+# NetworkPolicy-capable CNI (Calico, Cilium, etc.). Tune the selectors to your
+# environment before enabling it in kustomization.yaml — an over-tight policy
+# will silently block the job's API/SMTP calls.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: sync-log-triage-egress
+  labels:
+    app.kubernetes.io/name: sync-log-triage
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: sync-log-triage
+  policyTypes:
+    - Egress
+  egress:
+    # DNS resolution
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Airbyte server API (adjust the label selector to the Airbyte server pods)
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: airbyte-server
+      ports:
+        - protocol: TCP
+          port: 8001
+    # SMTP relay — replace with your relay's egress target (CIDR shown).
+    # - to:
+    #     - ipBlock:
+    #         cidr: 10.0.0.0/8
+    #   ports:
+    #     - protocol: TCP
+    #       port: 587

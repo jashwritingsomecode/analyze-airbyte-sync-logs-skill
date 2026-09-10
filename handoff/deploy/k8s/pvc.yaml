@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: sync-log-triage-state
+  labels:
+    app.kubernetes.io/name: sync-log-triage
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      # Holds the fetch state file, fetched logs, and accumulated reports.
+      # Small; bump if you retain a long report history.
+      storage: 1Gi
+  # Uncomment and set if the cluster has no usable default StorageClass:
+  # storageClassName: standard

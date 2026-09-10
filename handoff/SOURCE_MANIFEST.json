@@ -1,0 +1,145 @@
+{
+  "source_revision": "a2c711127dd40a6546c1726f5ea103183b505122",
+  "package_date": "2026-09-10",
+  "files": [
+    {
+      "path": "LICENSE",
+      "source_sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+      "packaged_sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+      "modified_for_handoff": false
+    },
+    {
+      "path": "scripts/analyze-sync-logs.py",
+      "source_sha256": "a5b82853ad8e3a02baa0cc24a91ba29130d8763c9f0913603245f34ea057274c",
+      "packaged_sha256": "a5b82853ad8e3a02baa0cc24a91ba29130d8763c9f0913603245f34ea057274c",
+      "modified_for_handoff": false
+    },
+    {
+      "path": "scripts/categorize.py",
+      "source_sha256": "a4705b2b3ecbd9c3c20170756df0632a7e7873f36bfc6bb155246dc383bb2f92",
+      "packaged_sha256": "a4705b2b3ecbd9c3c20170756df0632a7e7873f36bfc6bb155246dc383bb2f92",
+      "modified_for_handoff": false
+    },
+    {
+      "path": "scripts/emit-sync-events.py",
+      "source_sha256": "c964100107134e126523addf9f910c0736c56641eaab218f48fe6ce8d57fa310",
+      "packaged_sha256": "c964100107134e126523addf9f910c0736c56641eaab218f48fe6ce8d57fa310",
+      "modified_for_handoff": false
+    },
+    {
+      "path": "scripts/error_patterns.json",
+      "source_sha256": "de8ba2e7121849392bcf0195bf5eb00efe42052620ce300028f1a8ee40cee2f1",
+      "packaged_sha256": "de8ba2e7121849392bcf0195bf5eb00efe42052620ce300028f1a8ee40cee2f1",
+      "modified_for_handoff": false
+    },
+    {
+      "path": "scripts/fetch-airbyte-logs.py",
+      "source_sha256": "2371892ad2bce1e726bb5546d4234b70e79d696857f56403d152e31f6105cee7",
+      "packaged_sha256": "2371892ad2bce1e726bb5546d4234b70e79d696857f56403d152e31f6105cee7",
+      "modified_for_handoff": false
+    },
+    {
+      "path": "scripts/notify.py",
+      "source_sha256": "e31a4207eab55455b057cbf9285a848960e05c2bcec27a702cbe56a2582b7d85",
+      "packaged_sha256": "e31a4207eab55455b057cbf9285a848960e05c2bcec27a702cbe56a2582b7d85",
+      "modified_for_handoff": false
+    },
+    {
+      "path": "scripts/triage-cron.sh",
+      "source_sha256": "79cce2ede79748b59ab0fd8606d55b1d5e322e97927dba239deaca4d16475803",
+      "packaged_sha256": "79cce2ede79748b59ab0fd8606d55b1d5e322e97927dba239deaca4d16475803",
+      "modified_for_handoff": false
+    },
+    {
+      "path": "tests/logs/auth_failure.log",
+      "source_sha256": "9cdee5a2dc7306d15f1e47dcf38833530e61cb8a6c3bec12abdad73833eb1918",
+      "packaged_sha256": "9cdee5a2dc7306d15f1e47dcf38833530e61cb8a6c3bec12abdad73833eb1918",
+      "modified_for_handoff": false
+    },
+    {
+      "path": "tests/logs/malformed.log",
+      "source_sha256": "84ca94baca4428db464fd4dd5c0d5d6f666bd63e0bbca26bb3b82966e78e9632",
+      "packaged_sha256": "84ca94baca4428db464fd4dd5c0d5d6f666bd63e0bbca26bb3b82966e78e9632",
+      "modified_for_handoff": false
+    },
+    {
+      "path": "tests/logs/oom_failure.log",
+      "source_sha256": "cdfd5cfe880d38754b09441ee4054c33d74a6f134a625bbbffb6258cab95702d",
+      "packaged_sha256": "cdfd5cfe880d38754b09441ee4054c33d74a6f134a625bbbffb6258cab95702d",
+      "modified_for_handoff": false
+    },
+    {
+      "path": "tests/logs/partial_skip.log",
+      "source_sha256": "d8ae012d8c9a0ec1c5b07651139de85c4aa7a66ed34e08a10a8794b67cc670c6",
+      "packaged_sha256": "d8ae012d8c9a0ec1c5b07651139de85c4aa7a66ed34e08a10a8794b67cc670c6",
+      "modified_for_handoff": false
+    },
+    {
+      "path": "tests/logs/rate_limited.log",
+      "source_sha256": "7c8070bb661363d437ca0bbec480cc9832c972328505f2f72bc85773f0ea6ca4",
+      "packaged_sha256": "7c8070bb661363d437ca0bbec480cc9832c972328505f2f72bc85773f0ea6ca4",
+      "modified_for_handoff": false
+    },
+    {
+      "path": "tests/logs/secrets.log",
+      "source_sha256": "d0c1e0c54ac4af11ff26cb733cef5fcd7757ef9648dfc1f1b99571eb7d8ee96e",
+      "packaged_sha256": "d0c1e0c54ac4af11ff26cb733cef5fcd7757ef9648dfc1f1b99571eb7d8ee96e",
+      "modified_for_handoff": false
+    },
+    {
+      "path": "tests/logs/success_clean.log",
+      "source_sha256": "6566b4d46250c367963020c980855c883045a53c55861bb85daa126344c92f67",
+      "packaged_sha256": "6566b4d46250c367963020c980855c883045a53c55861bb85daa126344c92f67",
+      "modified_for_handoff": false
+    },
+    {
+      "path": "tests/logs/tls_failure.log",
+      "source_sha256": "407f6b162ad493b94ce0d88b7b80c831f20bf426c1f00823186b91acf342ef9b",
+      "packaged_sha256": "407f6b162ad493b94ce0d88b7b80c831f20bf426c1f00823186b91acf342ef9b",
+      "modified_for_handoff": false
+    },
+    {
+      "path": "tests/logs/unknown_error.log",
+      "source_sha256": "1a7e2e4710e32392c1b650336cc1462856c71662842bf8e8b24ef33aa0e57fb6",
+      "packaged_sha256": "1a7e2e4710e32392c1b650336cc1462856c71662842bf8e8b24ef33aa0e57fb6",
+      "modified_for_handoff": false
+    },
+    {
+      "path": "tests/run_tests.py",
+      "source_sha256": "bcbb695c45621ab0089d2bce2aaad2ea4e33699d3ba24c73aa10b20b11072ab6",
+      "packaged_sha256": "bcbb695c45621ab0089d2bce2aaad2ea4e33699d3ba24c73aa10b20b11072ab6",
+      "modified_for_handoff": false
+    },
+    {
+      "path": "deploy/k8s/cronjob.yaml",
+      "source_sha256": "3c4abd6302d8872adcbee95fd915040d6974da2ec65d5b183624ce442894b9ef",
+      "packaged_sha256": "66a22a717c1e3cf213a5e52424c69bd0f7641ab0691a98e2a190c2db35547c0b",
+      "modified_for_handoff": true
+    },
+    {
+      "path": "deploy/k8s/pvc.yaml",
+      "source_sha256": "78d28d4a7c02667ba15acb446456c824f46b043c22472bf3798a2d01f6a4ee69",
+      "packaged_sha256": "78d28d4a7c02667ba15acb446456c824f46b043c22472bf3798a2d01f6a4ee69",
+      "modified_for_handoff": false
+    },
+    {
+      "path": "deploy/k8s/serviceaccount.yaml",
+      "source_sha256": "62a7085940fe70e0591ea162660c9a2139f5cd2ce865829c77a7fa3f9681b8ea",
+      "packaged_sha256": "62a7085940fe70e0591ea162660c9a2139f5cd2ce865829c77a7fa3f9681b8ea",
+      "modified_for_handoff": false
+    },
+    {
+      "path": "deploy/k8s/networkpolicy.yaml",
+      "source_sha256": "7ff64159ccdc384d91f89963e7f13701cd0d00b3caffbce4192bdef183067da1",
+      "packaged_sha256": "7ff64159ccdc384d91f89963e7f13701cd0d00b3caffbce4192bdef183067da1",
+      "modified_for_handoff": false
+    },
+    {
+      "path": "deploy/k8s/secret.example.yaml",
+      "source_sha256": "1aa4ec0b61c1dbf4736f14bd407542cd92be269e401e59e61575a62b9ea3b304",
+      "packaged_sha256": "1aa4ec0b61c1dbf4736f14bd407542cd92be269e401e59e61575a62b9ea3b304",
+      "modified_for_handoff": false
+    }
+  ],
+  "distribution": "Generic GitHub handoff snapshot"
+}

@@ -1,5 +1,10 @@
 # Analyze Airbyte Sync Logs
 
+For the automated deployment handoff, start with the **[handoff documentation](handoff/README.md)**.
+It includes the solution guide, deployment steps, JSON reference, and knowledge-base
+maintenance instructions in a self-contained release snapshot. Run its deployment
+commands from `handoff/`.
+
 An AI coding assistant skill to generate human-readable diagnostic reports from Airbyte connector sync logs.
 
 Compatible with [OpenAI Codex](https://openai.com/index/codex/) and [Claude Code](https://docs.anthropic.com/en/docs/claude-code).

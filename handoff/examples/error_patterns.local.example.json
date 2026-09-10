@@ -1,0 +1,22 @@
+{
+  "patterns": [
+    {
+      "id": "local-upstream-maintenance-example",
+      "category": "api_error",
+      "severity": "medium",
+      "provenance": "generic",
+      "connectors": [],
+      "match": {
+        "any": [
+          "\\bEXAMPLE_UPSTREAM_MAINTENANCE\\b"
+        ]
+      },
+      "summary": "The example source reports an upstream maintenance window.",
+      "remediation": [
+        "Confirm the upstream service maintenance status.",
+        "After service resumes, inspect or run a subsequent sync through the normal operating process."
+      ],
+      "source_doc": null
+    }
+  ]
+}
